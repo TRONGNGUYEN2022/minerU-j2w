@@ -11,7 +11,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 # --- CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(page_title="MinerU Math Equation Preview & Pro", page_icon="📐", layout="wide")
+st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
 DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 
