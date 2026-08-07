@@ -276,7 +276,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
 
 # --- 5. GIAO DIỆN CHÍNH ---
 
-st.title("📐 MinerU Math Equation Preview & Pro")
+st.title("📐 Convert PDF/Image to word")
 
 tab1, tab2 = st.tabs(["🚀 Gửi lên MinerU Server (API)", "📁 Tải file layout.json & Ảnh có sẵn (Offline)"])
 
