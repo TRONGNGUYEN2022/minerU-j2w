@@ -20,7 +20,6 @@ except ImportError:
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", layout="wide")
 
-# Thư mục chứa ảnh tập trung
 UNIFIED_IMAGE_DIR = "images"
 os.makedirs(UNIFIED_IMAGE_DIR, exist_ok=True)
 
@@ -34,10 +33,10 @@ if "active_file_name" not in st.session_state:
 if "saved_mistral_key" not in st.session_state:
     st.session_state.saved_mistral_key = ""
 
-# --- HÀM GOM ẢNH VÀ GỘP JSON TỪ MISTRAL ZIP ---
+# --- HÀM ĐỌC VÀ GỘP JSON CHUẨN TỪ MISTRAL ZIP ---
 def unify_mistral_zip(zip_bytes):
     images_dict = {}
-    all_blocks = []
+    all_pages_data = []
     
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
         namelist = z.namelist()
@@ -50,33 +49,35 @@ def unify_mistral_zip(zip_bytes):
         sorted_pages = sorted(list(page_dirs), key=lambda x: int(x.split("-")[1]))
         
         for p_dir in sorted_pages:
-            # 1. Đọc file JSON metadata của từng trang và gộp vào danh sách chung
+            page_blocks = []
             meta_path = f"pages/{p_dir}/page-metadata.json"
             if meta_path in namelist:
                 try:
                     meta_content = json.loads(z.read(meta_path).decode("utf-8"))
-                    page_blocks = meta_content.get("blocks", [])
-                    # Thêm tiêu đề phân trang vào JSON tổng hợp
-                    all_blocks.append({"type": "title", "content": f"Trang {p_dir.split('-')[1]}"})
-                    all_blocks.extend(page_blocks)
+                    page_blocks = meta_content.get("blocks",[cite: 4])
                 except: pass
                 
-            # 2. Copy toàn bộ các file ảnh sang thư mục images tập trung
+            page_images = {}
             for f in namelist:
                 if f.startswith(f"pages/{p_dir}/") and (f.endswith(".jpeg") or f.endswith(".png") or f.endswith(".jpg")):
                     img_name = os.path.basename(f)
                     img_bytes = z.read(f)
+                    page_images[img_name] = img_bytes
                     images_dict[img_name] = img_bytes
                     
                     # Lưu vào thư mục vật lý 'images'
-                    img_physical_path = os.path.join(UNIFIED_IMAGE_DIR, img_name)
-                    with open(img_physical_path, "wb") as img_f:
+                    with open(os.path.join(UNIFIED_IMAGE_DIR, img_name), "wb") as img_f:
                         img_f.write(img_bytes)
                         
-    unified_json = {"pdf_info": [{"para_blocks": all_blocks}]}
-    return unified_json, images_dict
+            all_pages_data.append({
+                "page_name": p_dir,
+                "blocks": page_blocks,
+                "images": page_images
+            })
+            
+    return {"pages": all_pages_data}, images_dict
 
-# --- GỌI API MISTRAL OCR VÀ GỘP JSON ---
+# --- GỌI API MISTRAL OCR VÀ TẠO CẤU TRÚC TRANG ---
 def process_with_mistral_unified(uploaded_file, mistral_api_key, selected_model):
     if not MISTRAL_AVAILABLE:
         st.error("Chưa cài đặt thư viện `mistralai`.")
@@ -93,15 +94,17 @@ def process_with_mistral_unified(uploaded_file, mistral_api_key, selected_model)
             include_blocks=True
         )
         
-        all_blocks = []
+        all_pages_data = []
         images_dict = {}
         
         if hasattr(ocr_response, "pages"):
             for idx, page in enumerate(ocr_response.pages):
-                all_blocks.append({"type": "title", "content": f"Trang {idx+1}"})
+                p_dir = f"page-{idx+1}"
+                page_blocks = []
+                page_images = {}
                 
                 if hasattr(page, "markdown") and page.markdown:
-                    all_blocks.append({"type": "text", "content": page.markdown})
+                    page_blocks.append({"type": "text", "content": page.markdown})
                     
                 if hasattr(page, "images") and page.images:
                     for img in page.images:
@@ -112,26 +115,30 @@ def process_with_mistral_unified(uploaded_file, mistral_api_key, selected_model)
                             try:
                                 img_bytes = base64.b64decode(img_b64)
                                 img_filename = f"{img_id}.jpeg"
+                                page_images[img_filename] = img_bytes
                                 images_dict[img_filename] = img_bytes
                                 
-                                # Lưu vào thư mục vật lý
                                 with open(os.path.join(UNIFIED_IMAGE_DIR, img_filename), "wb") as img_f:
                                     img_f.write(img_bytes)
                                     
-                                all_blocks.append({
+                                page_blocks.append({
                                     "type": "image",
                                     "imageId": img_filename,
                                     "content": f"![{img_filename}]({img_filename})"
                                 })
                             except: pass
                             
-        unified_json = {"pdf_info": [{"para_blocks": all_blocks}]}
-        return unified_json, images_dict
+                all_pages_data.append({
+                    "page_name": p_dir,
+                    "blocks": page_blocks,
+                    "images": page_images
+                })
+                            
+        return {"pages": all_pages_data}, images_dict
     except Exception as e:
         st.error(f"Lỗi Mistral OCR: {e}")
         return None, {}
 
-# --- HÀM LẤY BYTE ẢNH TỪ THƯ MỤC IMAGES HOẶC DICTIONARY ---
 def get_unified_image_bytes(img_name, images_dict):
     if not img_name: return None
     clean_name = os.path.basename(img_name)
@@ -143,38 +150,38 @@ def get_unified_image_bytes(img_name, images_dict):
             return f.read()
     return None
 
-# --- RENDER PREVIEW HỢP NHẤT TỪ JSON DUY NHẤT & THƯ MỤC IMAGES ---
+# --- RENDER PREVIEW CHÍNH XÁC THEO TỪNG BLOCK VÀ XỬ LÝ EQUATION ---
 def render_unified_json_preview(json_data, images_dict, file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
     
-    pages = json_data.get("pdf_info", [])
+    pages = json_data.get("pages", [])
     for page in pages:
-        blocks = page.get("para_blocks", [])
+        p_name = page.get("page_name", "page-1")
+        blocks = page.get("blocks", [])
+        page_images = page.get("images", {})
+        all_imgs = {**images_dict, **page_images}
+        
+        preview_inner_html += f"<hr/><h3 style='color: #2b6cb0; margin-top: 20px;'>Trang {p_name.split('-')[1]}</h3>"
+        
         for block in blocks:
             b_type = block.get("type")
             content = block.get("content", "")
             
-            if b_type == "title":
-                preview_inner_html += f"<hr/><h3 style='color: #2b6cb0; margin-top: 20px;'>{content}</h3>"
-            elif b_type == "image":
+            if b_type == "image":
                 img_id = block.get("imageId")
                 if not img_id:
                     m = re.search(r'\((.*?)\)', content)
                     if m: img_id = os.path.basename(m.group(1))
                 
-                img_bytes = get_unified_image_bytes(img_id, images_dict)
+                img_bytes = get_unified_image_bytes(img_id, all_imgs)
                 if img_bytes:
                     encoded = base64.b64encode(img_bytes).decode("utf-8")
                     preview_inner_html += f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{encoded}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>'
+            elif b_type in ["header", "footer"]:
+                preview_inner_html += f"<div style='font-size: 13px; color: #a0aec0; margin: 5px 0;'>{content}</div>"
             else:
-                # Quét xem trong nội dung văn bản có chứa tên ảnh markdown nào không để tự động chèn
-                for img_name in images_dict.keys():
-                    if img_name in content:
-                        ibytes = get_unified_image_bytes(img_name, images_dict)
-                        if ibytes:
-                            enc = base64.b64encode(ibytes).decode("utf-8")
-                            content = content.replace(f"![{img_name}]({img_name})", f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{enc}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>')
-                
+                # Xử lý các công thức LaTeX thô thành dạng hiển thị KaTeX chuẩn equation
+                # Đảm bảo các công thức chưa được bọc $ sẽ được nhận diện hoặc giữ nguyên định dạng
                 formatted_content = content.replace("\n", "<br>")
                 preview_inner_html += f"<div style='margin-bottom: 10px;'>{formatted_content}</div>"
                 
@@ -186,7 +193,7 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
     <head>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}, {{left: '$$', right: '$$', display: true}}]}});"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}, {{left: '$$', right: '$$', display: true}}, {{left: '\\\\(', right: '\\\\)', display: false}}, {{left: '\\\\[', right: '\\\\]', display: true}}]}});"></script>
         <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
         <style>
             body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; }}
@@ -226,7 +233,7 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
             const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
             const link = document.createElement('a');
             link.href = URL.createObjectURL(converted);
-            link.download = "{file_name}_Unified.docx";
+            link.download = "{file_name}_Accurate.docx";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -242,7 +249,7 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
     </body>
     </html>
     """
-    st.markdown("### 👁️ Bản xem trước Hợp nhất (JSON Tổng + Thư mục Images)")
+    st.markdown("### 👁️ Bản xem trước Định vị Ảnh & Công thức Chuẩn xác")
     components.html(copier_component, height=750, scrolling=False)
 
 
@@ -251,7 +258,7 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
 st.title("📐 Convert PDF/Image to word")
 
 tab1, tab2 = st.tabs([
-    "🌪️ Mistral OCR (Unified JSON & Images)", 
+    "🌪️ Mistral OCR (Accurate Parser)", 
     "📁 Tải file ZIP kết quả Offline"
 ])
 
@@ -262,17 +269,17 @@ with tab1:
     
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="t2")
     
-    if st.button("📤 Gửi & Xử lý Hợp nhất", key="b2"):
+    if st.button("📤 Gửi & Xử lý Định vị Chuẩn", key="b2"):
         if not mistral_file: st.warning("Vui lòng chọn file!")
         elif not st.session_state.saved_mistral_key: st.error("Nhập Mistral API Key!")
         else:
-            with st.spinner("Đang xử lý, gom ảnh vào thư mục images và hợp nhất JSON..."):
+            with st.spinner("Đang xử lý phân tích khối block và định vị ảnh..."):
                 u_json, u_imgs = process_with_mistral_unified(mistral_file, st.session_state.saved_mistral_key, "mistral-ocr-latest")
                 if u_json:
                     st.session_state.active_json = u_json
                     st.session_state.active_images_dict = u_imgs
                     st.session_state.active_file_name = mistral_file.name.rsplit(".", 1)[0]
-                    st.success("Hoàn tất xử lý hợp nhất thành công!")
+                    st.success("Hoàn tất xử lý định vị chuẩn xác thành công!")
                     st.rerun()
 
 with tab2:
@@ -285,10 +292,9 @@ with tab2:
             st.session_state.active_json = u_json
             st.session_state.active_images_dict = u_imgs
             st.session_state.active_file_name = uploaded_zip.name.rsplit(".", 1)[0]
-            st.success("Đã nạp file ZIP, gom ảnh vào thư mục images và gộp JSON thành công!")
+            st.success("Đã nạp file ZIP, giải mã block định vị và gom ảnh thành công!")
             st.rerun()
 
-# Điều phối khung xem trước chung
 if st.session_state.active_json is not None:
     st.divider()
     render_unified_json_preview(
