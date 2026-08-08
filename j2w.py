@@ -18,7 +18,7 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
-# Import thư viện Mistral chính thức
+# Import thư viện mistralai chuẩn xác
 try:
     from mistralai import Mistral
     MISTRAL_AVAILABLE = True
@@ -238,7 +238,7 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         return None, {}
 
 
-# --- 2.2 HÀM XỬ LÝ BẰNG MISTRAL OCR API ---
+# --- 2.2 HÀM XỬ LÝ CHUẨN BẰNG MISTRAL SDK ---
 def process_with_mistral(uploaded_file, mistral_api_key, selected_model):
     if not MISTRAL_AVAILABLE:
         st.error("Chưa cài đặt thư viện `mistralai`. Vui lòng thêm `mistralai` vào requirements.txt")
@@ -247,32 +247,19 @@ def process_with_mistral(uploaded_file, mistral_api_key, selected_model):
     try:
         client = Mistral(api_key=mistral_api_key)
         file_bytes = uploaded_file.getvalue()
-        file_name = uploaded_file.name
         
-        # Mã hóa base64 để truyền dữ liệu file trực tiếp lên Mistral OCR
-        base64_data = base64.b64encode(file_bytes).decode("utf-8")
-        file_ext = file_name.split(".")[-1].lower()
-        
-        if file_ext == "pdf":
-            document_payload = {
-                "type": "document_url",
-                "document_url": f"data:application/pdf;base64,{base64_data}"
-            }
-        else:
-            mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "avif": "image/avif"}
-            mime_type = mime_map.get(file_ext, "image/jpeg")
-            document_payload = {
-                "type": "image_url",
-                "image_url": f"data:{mime_type};base64,{base64_data}"
-            }
+        base64_file = base64.b64encode(file_bytes).decode('utf-8')
 
         ocr_response = client.ocr.process(
+            document={
+                "type": "document_url",
+                "document_url": f"data:application/pdf;base64,{base64_file}"
+            },
             model=selected_model,
-            document=document_payload,
-            include_image_base64=True
+            include_image_base64=True,
+            include_blocks=True
         )
         
-        # Gom nội dung Markdown từ các trang trả về của Mistral OCR
         full_markdown = ""
         extracted_images = {}
         
@@ -291,7 +278,6 @@ def process_with_mistral(uploaded_file, mistral_api_key, selected_model):
                             except:
                                 pass
 
-        # Chuyển đổi markdown sang định dạng tương thích hiển thị HTML preview
         simulated_json = {
             "pdf_info": [
                 {
@@ -312,7 +298,7 @@ def process_with_mistral(uploaded_file, mistral_api_key, selected_model):
         }
         return simulated_json, extracted_images
     except Exception as e:
-        st.error(f"Lỗi khi xử lý bằng Mistral OCR: {e}")
+        st.error(f"Lỗi khi xử lý qua Mistral OCR: {e}")
         return None, {}
 
 
@@ -592,7 +578,7 @@ with tab2:
 
     selected_mistral_model = st.selectbox(
         "Chọn Model Mistral OCR:",
-        ["mistral-ocr-latest", "mistral-ocr-2512"],
+        ["mistral-ocr-latest"],
         index=0
     )
 
