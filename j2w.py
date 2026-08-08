@@ -18,9 +18,9 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
-# Import thư viện mistralai chuẩn xác
+# Import thư viện mistralai chuẩn theo SDK 2.0
 try:
-    from mistralai import Mistral
+    from mistralai.client import Mistral
     MISTRAL_AVAILABLE = True
 except ImportError:
     MISTRAL_AVAILABLE = False
@@ -238,7 +238,7 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         return None, {}
 
 
-# --- 2.2 HÀM XỬ LÝ CHUẨN BẰNG MISTRAL SDK ---
+# --- 2.2 HÀM XỬ LÝ CHUẨN BẰNG MISTRAL SDK 2.0 ---
 def process_with_mistral(uploaded_file, mistral_api_key, selected_model):
     if not MISTRAL_AVAILABLE:
         st.error("Chưa cài đặt thư viện `mistralai`. Vui lòng thêm `mistralai` vào requirements.txt")
