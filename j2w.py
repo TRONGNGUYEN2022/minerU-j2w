@@ -165,7 +165,7 @@ def check_task_status_v4(api_token, task_id):
     return None
 
 
-# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
+# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API (TỐI ƯU TOÁN HỌC) ---
 def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
     if not GEMINI_AVAILABLE:
         st.error("Chưa cài đặt thư viện `google-genai`. Vui lòng thêm `google-genai` vào requirements.txt")
@@ -177,11 +177,10 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         mime_type = uploaded_file.type
         
         prompt = (
-            "Bạn là một chuyên gia OCR và chuyển đổi tài liệu học tập. Hãy đọc toàn bộ tài liệu (PDF hoặc Ảnh) này một cách chính xác tuyệt đối. "
-            "Trích xuất toàn bộ nội dung văn bản, tiêu đề, bài tập, bảng biểu và các công thức toán học. "
-            "Đối với các công thức toán học, bắt buộc phải định dạng bằng chuẩn LaTeX (đặt trong dấu $...$ cho inline và $$...$$ cho hiển thị dòng riêng). "
+            "Bạn là một chuyên gia OCR và chuyển đổi tài liệu toán học. Hãy đọc tài liệu này thật chính xác tuyệt đối. "
+            "Yêu cầu cực kỳ quan trọng đối với công thức toán học: Tất cả các biểu thức toán học, phân số, số mũ, ký hiệu (như \\frac, \\pm, \\cdot, v.v.) BẮT BUỘC phải được đặt trong cặp dấu đô la ($...$ cho công thức inline hoặc $$...$$ cho công thức đứng dòng riêng biệt). Không được để mã LaTeX trần trụi ngoài văn bản. "
             "Trình bày kết quả cấu trúc thành một đoạn mã HTML sạch sẽ, trong đó các đoạn văn dùng thẻ <p>, tiêu đề dùng thẻ <h3> hoặc <b>, bảng biểu dùng thẻ <table> được đóng khung viền rõ ràng. "
-            "Không kèm theo lời dẫn giải thừa thãi, chỉ trả về nội dung HTML hoàn chỉnh."
+            "Chỉ trả về nội dung HTML hoàn chỉnh, không kèm theo giải thích gì thêm."
         )
 
         response = client.models.generate_content(
