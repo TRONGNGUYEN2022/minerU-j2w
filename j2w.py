@@ -41,14 +41,13 @@ def process_markdown_zip(zip_bytes):
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
         namelist = z.namelist()
         
-        # Tìm các thư mục trang page-X theo đúng thứ tự cuốn chiếu
+        # Quét các thư mục trang page-X theo thứ tự cuốn chiếu
         page_dirs = set()
         for f in namelist:
             match = re.search(r"pages/(page-\d+)/", f)
             if match: page_dirs.add(match.group(1))
         sorted_pages = sorted(list(page_dirs), key=lambda x: int(x.split("-")[1]))
         
-        # Đọc cuốn chiếu markdown và ảnh của từng trang từ thư mục pages/
         for p_dir in sorted_pages:
             md_path = f"pages/{p_dir}/markdown.md"
             if md_path in namelist:
@@ -61,7 +60,7 @@ def process_markdown_zip(zip_bytes):
         if not root_markdown and "markdown.md" in namelist:
             root_markdown = z.read("markdown.md").decode("utf-8")
             
-        # Gom toàn bộ file ảnh vào thư mục images/ và bộ nhớ
+        # Gom toàn bộ file ảnh vào thư mục images/ chung
         for f in namelist:
             if ("pages/" in f or "images/" in f or "/" not in f) and (f.endswith(".jpeg") or f.endswith(".png") or f.endswith(".jpg")):
                 img_name = os.path.basename(f)
@@ -128,11 +127,11 @@ def get_image_bytes_helper(img_name, images_dict):
             return f.read()
     return None
 
-# --- RENDER PREVIEW HOÀN CHỈNH (CHÈN ẢNH & CHUẨN HÓA EQUATION) ---
+# --- RENDER PREVIEW CHÍNH XÁC THEO TÊN ẢNH VÀ CHUẨN HÓA EQUATION ---
 def render_markdown_preview(markdown_content, images_dict, file_name="document"):
     processed_html = markdown_content
     
-    # 1. Thay thế chính xác các thẻ ảnh markdown bằng chuỗi base64 thực tế từ thư mục images
+    # 1. Quét tìm các chuỗi ![img-X.jpeg](img-X.jpeg) và chèn ảnh thực tế từ thư mục images
     def replace_img_tag(match):
         img_filename = os.path.basename(match.group(2))
         ibytes = get_image_bytes_helper(img_filename, images_dict)
@@ -143,8 +142,7 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
 
     processed_html = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_tag, processed_html)
     
-    # 2. Xử lý chuẩn hóa các công thức toán học chưa được bọc $ thành dạng equation hiển thị KaTeX
-    # Đảm bảo các biểu thức phân số, căn bậc hai, delta được đặt trong dấu hiệu nhận diện của KaTeX
+    # 2. Xử lý định dạng xuống dòng và giữ nguyên cấu trúc bảng/markdown
     formatted_html = processed_html.replace("\n", "<br>")
 
     preview_inner_html = f'''
@@ -171,6 +169,8 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
             #status-msg {{ margin-left: 10px; color: #2f855a; font-weight: bold; font-size: 13px; display: none; }}
             .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; }}
             img {{ max-width: 100%; height: auto; display: block; margin: 15px auto; border-radius: 6px; }}
+            table {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
+            th, td {{ border: 1px solid #cbd5e0; padding: 8px; text-align: left; }}
         </style>
     </head>
     <body>
@@ -199,7 +199,7 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
             const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
             const link = document.createElement('a');
             link.href = URL.createObjectURL(converted);
-            link.download = "{file_name}_Equation_Fixed.docx";
+            link.download = "{file_name}_Perfect.docx";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -215,7 +215,7 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
     </body>
     </html>
     """
-    st.markdown("### 👁️ Bản xem trước Định dạng Chuẩn Equation & Hình ảnh")
+    st.markdown("### 👁️ Bản xem trước Tối ưu Hóa Ảnh & Công thức Toán học")
     components.html(copier_component, height=750, scrolling=False)
 
 
@@ -224,7 +224,7 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
 st.title("📐 Convert PDF/Image to word")
 
 tab1, tab2 = st.tabs([
-    "🌪️ Mistral OCR (Parser)", 
+    "🌪️ Mistral OCR (Perfect Parser)", 
     "📁 Tải file ZIP kết quả Offline"
 ])
 
@@ -235,11 +235,11 @@ with tab1:
     
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="t2")
     
-    if st.button("📤 Gửi & Xử lý", key="b2"):
+    if st.button("📤 Gửi & Xử lý Hoàn thiện", key="b2"):
         if not mistral_file: st.warning("Vui lòng chọn file!")
         elif not st.session_state.saved_mistral_key: st.error("Nhập Mistral API Key!")
         else:
-            with st.spinner("Đang xử lý lấy file markdown và chèn ảnh đúng vị trí..."):
+            with st.spinner("Đang xử lý phân tích và chèn ảnh chính xác..."):
                 md_content, imgs = process_markdown_api(mistral_file, st.session_state.saved_mistral_key, "mistral-ocr-latest")
                 if md_content:
                     st.session_state.active_markdown_content = md_content
