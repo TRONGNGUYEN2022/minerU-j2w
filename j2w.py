@@ -417,7 +417,6 @@ with tab1:
         if gemini_token_input:
             st.session_state.saved_gemini_key = gemini_token_input
 
-    # Lựa chọn model Gemini (Đã bổ sung các model 3.6, 3.5, 2.5)
     selected_gemini_model = st.selectbox(
         "Chọn Model Gemini dự phòng:",
         ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
@@ -465,7 +464,6 @@ with tab1:
                             break
                         progress_bar.progress(min((i + 1) * 2, 100))
 
-            # Nếu MinerU lỗi -> Gọi Gemini API với model đã chọn
             if not success_processed:
                 active_key = st.session_state.saved_gemini_key.strip() or gemini_token_input.strip()
                 if active_key:
@@ -481,21 +479,22 @@ with tab1:
                     st.error("MinerU thất bại và bạn chưa nhập Gemini API Key để dùng làm phương án dự phòng!")
 
 with tab2:
-    st.subheader("🌐 Truy cập nhanh MinerU Web Extractor")
-    st.markdown("Bạn có thể truy cập trực tiếp trang web xử lý ưu tiên của MinerU tại đây để upload file không bị giới hạn lỗi API:")
-    st.markdown("[🔗 Mở trang MinerU Web Extractor](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
+    st.subheader("🌐 MinerU Web Extractor (Nhúng trực tiếp)")
+    st.markdown("Trang web chính thức được nhúng bên dưới. Bạn có thể thao tác trực tiếp hoặc bấm vào nút mở tab mới nếu trình duyệt chặn khung nhúng.")
+    st.markdown("[🔗 Mở trang MinerU Web Extractor trong tab mới](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
+    
+    # Nhúng trực tiếp trang web vào Streamlit
+    components.iframe("https://mineru.net/OpenSourceTools/Extractor", height=650, scrolling=True)
     
     st.divider()
-    st.subheader("📂 Tự động đồng bộ file kết quả từ MinerU Web")
-    st.markdown(f"Hệ thống đã chuẩn bị thư mục mặc định: `{DEFAULT_DOWNLOAD_DIR}/` và thư mục `images/` bên trong.")
-    st.markdown("Sau khi bạn tải file ZIP kết quả từ trang web MinerU về, hãy giải nén và tải file `layout.json` cùng thư mục `images` lên ô bên dưới để ứng dụng tự động xử lý:")
+    st.subheader("📥 Nhận file kết quả từ Web Extractor vào Thư mục Tự động")
+    st.markdown(f"Sau khi tải file giải nén từ trang web trên về máy, hãy tải file `layout.json` và thư mục `images` lên đây để hệ thống tự động lưu vào thư mục `{DEFAULT_DOWNLOAD_DIR}/` và xử lý chuyển đổi Word:")
 
-    web_json_f = st.file_uploader("Tải file layout.json từ gói giải nén MinerU Web", type=["json"], key="web_json")
-    web_image_files = st.file_uploader("Tải toàn bộ file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="web_imgs")
+    web_json_f = st.file_uploader("Tải file layout.json từ gói kết quả Web", type=["json"], key="web_json_tab2")
+    web_image_files = st.file_uploader("Tải toàn bộ file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="web_imgs_tab2")
     
     if web_json_f:
         try:
-            # Lưu tự động vào thư mục mặc định
             json_bytes = web_json_f.getvalue()
             json_path = os.path.join(DEFAULT_DOWNLOAD_DIR, web_json_f.name)
             with open(json_path, "wb") as f:
@@ -515,7 +514,7 @@ with tab2:
                         img_f.write(img_bytes)
                 st.session_state.active_images_dict = images_dict
                 
-            st.success(f"Đã lưu và nạp dữ liệu thành công vào thư mục mặc định `{DEFAULT_DOWNLOAD_DIR}/`!")
+            st.success(f"Đã lưu và tự động nạp dữ liệu thành công từ thư mục `{DEFAULT_DOWNLOAD_DIR}/`!")
             st.rerun()
         except Exception as e:
             st.error(f"Lỗi khi xử lý file: {e}")
