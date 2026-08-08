@@ -37,6 +37,10 @@ if "extracted_images_dir" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "MinerU_Document"
 
+# Khởi tạo lưu trữ Gemini API Key tự động trong session
+if "saved_gemini_key" not in st.session_state:
+    st.session_state.saved_gemini_key = ""
+
 # --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
 
 def clean_and_wrap_latex(latex_str):
@@ -161,8 +165,8 @@ def check_task_status_v4(api_token, task_id):
     return None
 
 
-# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI PRO API ---
-def fallback_process_with_gemini(uploaded_file, gemini_api_key):
+# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
+def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
     if not GEMINI_AVAILABLE:
         st.error("Chưa cài đặt thư viện `google-genai`. Vui lòng thêm `google-genai` vào requirements.txt")
         return None, {}
@@ -181,7 +185,7 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key):
         )
 
         response = client.models.generate_content(
-            model='gemini-2.5-pro', # Hoặc gemini-1.5-pro
+            model=selected_model,
             contents=[
                 types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
                 prompt
@@ -189,11 +193,9 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key):
         )
         
         html_content = response.text
-        # Làm sạch markdown code block nếu có
         html_content = re.sub(r"^```html\s*", "", html_content, flags=re.IGNORECASE)
         html_content = re.sub(r"\s*```$", "", html_content)
 
-        # Chuyển đổi kết quả sang dạng layout json giả lập tương thích hàm preview sẵn có
         simulated_json = {
             "pdf_info": [
                 {
@@ -214,7 +216,7 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key):
         }
         return simulated_json, {}
     except Exception as e:
-        st.error(f"Lỗi khi xử lý dự phòng bằng Gemini Pro: {e}")
+        st.error(f"Lỗi khi xử lý dự phòng bằng Gemini: {e}")
         return None, {}
 
 
@@ -386,18 +388,30 @@ st.title("📐 Convert PDF/Image to word")
 tab1, tab2 = st.tabs(["🚀 Gửi lên MinerU Server (API)", "📁 Tải file layout.json & Ảnh có sẵn (Offline)"])
 
 with tab1:
-    st.subheader("Cấu hình API Keys")
+    st.subheader("Cấu hình API Keys & Model")
+    
     col_k1, col_k2 = st.columns(2)
     with col_k1:
         api_token_input = st.text_input("Nhập MinerU API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
         if st.button("Đổi MinerU Key"):
             st.session_state.api_key_editable = not st.session_state.api_key_editable
             st.rerun()
+            
     with col_k2:
-        gemini_token_input = st.text_input("Nhập Gemini Pro API Key (Dự phòng):", value="", type="password", disabled=not st.session_state.gemini_key_editable)
-        if st.button("Đổi Gemini Key"):
-            st.session_state.gemini_key_editable = not st.session_state.gemini_key_editable
-            st.rerun()
+        gemini_token_input = st.text_input(
+            "Nhập Gemini API Key (Dự phòng):", 
+            value=st.session_state.saved_gemini_key, 
+            type="password"
+        )
+        if gemini_token_input != st.session_state.saved_gemini_key:
+            st.session_state.saved_gemini_key = gemini_token_input
+
+    # Lựa chọn model Gemini
+    selected_gemini_model = st.selectbox(
+        "Chọn Model Gemini dự phòng:",
+        ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
+        index=0
+    )
 
     api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích", type=["pdf", "png", "jpg", "jpeg"])
     
@@ -407,7 +421,6 @@ with tab1:
         else:
             success_processed = False
             
-            # Thử xử lý qua MinerU trước
             with st.spinner("Đang tải file lên máy chủ trung gian..."):
                 file_url = upload_temp_file_robust(api_file)
                 
@@ -437,23 +450,23 @@ with tab1:
                                     st.rerun()
                             break
                         elif state == "failed":
-                            st.warning(f"MinerU báo lỗi: {task_data.get('err_msg')}. Đang chuyển sang dự phòng bằng Gemini Pro...")
+                            st.warning(f"MinerU báo lỗi: {task_data.get('err_msg')}. Đang chuyển sang dự phòng bằng Gemini...")
                             break
                         progress_bar.progress(min((i + 1) * 2, 100))
 
-            # Nếu MinerU lỗi hoặc không lấy được kết quả và người dùng có nhập Gemini Key -> Dùng Gemini Pro làm phương án dự phòng
+            # Nếu MinerU lỗi -> Gọi Gemini API với model đã chọn
             if not success_processed:
-                if gemini_token_input.strip():
-                    with st.spinner("MinerU gặp sự cố. Đang tiến hành trích xuất bằng Gemini Pro API..."):
-                        g_json, g_imgs = fallback_process_with_gemini(api_file, gemini_token_input.strip())
+                if st.session_state.saved_gemini_key.strip():
+                    with st.spinner(f"MinerU gặp sự cố. Đang tiến hành trích xuất bằng {selected_gemini_model}..."):
+                        g_json, g_imgs = fallback_process_with_gemini(api_file, st.session_state.saved_gemini_key.strip(), selected_gemini_model)
                         if g_json:
                             st.session_state.active_json = g_json
                             st.session_state.active_images_dict = g_imgs
                             st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
-                            st.success("Đã hoàn tất trích xuất thay thế bằng Gemini Pro thành công!")
+                            st.success(f"Đã hoàn tất trích xuất thay thế bằng {selected_gemini_model} thành công!")
                             st.rerun()
                 else:
-                    st.error("MinerU thất bại và bạn chưa nhập Gemini Pro API Key để dùng làm phương án dự phòng!")
+                    st.error("MinerU thất bại và bạn chưa nhập Gemini API Key để dùng làm phương án dự phòng!")
 
 with tab2:
     json_f = st.file_uploader("Chọn file layout.json", type=["json"])
