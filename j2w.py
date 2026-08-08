@@ -430,7 +430,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Preview xịn sò)
+# TAB 2: MISTRAL OCR (API + Pandoc + Equation Preview + Nút Tải Word & Copy)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -450,7 +450,7 @@ with tab2:
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
-            with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và xử lý nội dung..."):
+            with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và biên dịch file Word..."):
                 try:
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
@@ -487,7 +487,7 @@ with tab2:
                                                 img_f.write(img_bytes)
                                         except: pass
 
-                    # Biên dịch file Word dự phòng bằng Pandoc
+                    # Biên dịch file Word bằng Pandoc
                     temp_md_path = "temp_input.md"
                     with open(temp_md_path, "w", encoding="utf-8") as f:
                         f.write(full_markdown)
@@ -504,17 +504,30 @@ with tab2:
                     st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
                     
                     if os.path.exists(temp_md_path): os.remove(temp_md_path)
-                    st.success("🎉 Xử lý Mistral OCR thành công!")
+                    st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview xịn sò đồng bộ với MinerU
+    # Hiển thị Khung Preview tích hợp nút tải Word Pandoc và Sao chép nhanh
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
-        raw_md = st.session_state.mistral_preview_markdown
+        col_m1, col_m2 = st.columns([2, 1])
+        with col_m1:
+            st.subheader("👁️ Bản xem trước kết quả Mistral OCR")
+        with col_m2:
+            if st.session_state.mistral_docx_bytes:
+                st.download_button(
+                    label="📥 Tải xuống file Word (.docx) chuẩn Pandoc",
+                    data=st.session_state.mistral_docx_bytes,
+                    file_name=f"{st.session_state.active_file_name}_Mistral.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
+
+        preview_md = st.session_state.mistral_preview_markdown
         
-        def replace_img_smart_html(match):
+        def replace_img_smart(match):
             alt_text = match.group(1)
             raw_path = match.group(2)
             target_name = os.path.basename(raw_path)
@@ -525,92 +538,40 @@ with tab2:
                     break
             if matched_bytes:
                 b64_data = base64.b64encode(matched_bytes).decode('utf-8')
-                return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 8px; border: 1px solid #2d3748;" alt="{alt_text}" /></div>'
+                return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" alt="{alt_text}" /></div>'
             return match.group(0)
 
-        processed_html = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart_html, raw_md)
-        processed_html = processed_html.replace(r"\(", "$").replace(r"\)", "$")
-        processed_html = processed_html.replace(r"\[", "$$").replace(r"\]", "$$")
-        
-        html_lines = processed_html.split("\n")
-        formatted_body_html = ""
-        for line in html_lines:
-            if line.strip().startswith("###"):
-                formatted_body_html += f"<h3 style='color: #2b6cb0; margin-top: 20px;'>{line.replace('###', '').strip()}</h3>"
-            elif line.strip().startswith("##"):
-                formatted_body_html += f"<h2 style='color: #2c5282; margin-top: 25px;'>{line.replace('##', '').strip()}</h2>"
-            elif line.strip().startswith("<hr/>"):
-                formatted_body_html += "<hr style='border: 0; border-top: 1px solid #cbd5e0; margin: 20px 0;'/>"
-            elif line.strip():
-                formatted_body_html += f"<p style='margin-bottom: 10px;'>{line}</p>"
+        preview_md = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart, preview_md)
+        preview_md = preview_md.replace(r"\(", "$").replace(r"\)", "$")
+        preview_md = preview_md.replace(r"\[", "$$").replace(r"\]", "$$")
 
-        mistral_component_html = f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="utf-8">
-            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}, {{left: '$$', right: '$$', display: true}}]}});"></script>
-            <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
-            <style>
-                body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; color: #2d3748; }}
-                .btn-action {{ padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-                .btn-copy {{ background-color: #2b6cb0; }}
-                .btn-copy:hover {{ background-color: #2c5282; }}
-                .btn-word {{ background-color: #2f855a; }}
-                .btn-word:hover {{ background-color: #276749; }}
-                #status-msg {{ margin-left: 10px; color: #2f855a; font-weight: bold; font-size: 13px; display: none; }}
-                .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; line-height: 1.8; }}
-                table {{ border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748; }}
-                th {{ border: 2px solid #2d3748; padding: 6px 10px; background-color: #edf2f7; font-weight: bold; text-align: center; }}
-                td {{ border: 2px solid #2d3748; padding: 6px 10px; vertical-align: middle; }}
-            </style>
-        </head>
-        <body>
-            <div>
-                <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
-                <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu thành file Word (.docx)</button>
-                <span id="status-msg">✔ Thao tác thành công!</span>
-            </div>
-            <div class="preview-card" id="content-to-copy">
-                {formatted_body_html}
-            </div>
-            <script>
-            function copyContentToClipboard() {{
+        with st.container(border=True):
+            st.markdown(preview_md, unsafe_allow_html=True)
+
+        copy_helper_html = """
+        <script>
+        function copyPreviewText() {
+            const container = window.parent.document.querySelector('.stMarkdown');
+            if (container) {
                 const range = document.createRange();
-                range.selectNode(document.getElementById('content-to-copy'));
+                range.selectNode(container);
                 window.getSelection().removeAllRanges();
                 window.getSelection().addRange(range);
-                try {{
+                try {
                     document.execCommand('copy');
-                    showStatus("Đã sao chép vào bộ nhớ tạm! Mở Word và nhấn Ctrl+V");
-                }} catch (err) {{ alert('Không thể sao chép tự động!'); }}
+                    alert('Đã sao chép nội dung vào bộ nhớ tạm! Bạn có thể dán thẳng vào Word.');
+                } catch(e) {
+                    alert('Không thể sao chép tự động.');
+                }
                 window.getSelection().removeAllRanges();
-            }}
-            function saveAsWordDocx() {{
-                const contentHTML = document.getElementById('content-to-copy').innerHTML;
-                const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(converted);
-                link.download = "{st.session_state.active_file_name}_Mistral.docx";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                showStatus("Đã tải xuống file Word thành công!");
-            }}
-            function showStatus(msg) {{
-                const status = document.getElementById('status-msg');
-                status.innerText = "✔ " + msg;
-                status.style.display = 'inline';
-                setTimeout(() => {{ status.style.display = 'none'; }}, 4000);
-            }}
-            </script>
-        </body>
-        </html>
+            }
+        }
+        </script>
+        <button onclick="copyPreviewText()" style="background-color: #2b6cb0; color: white; padding: 10px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-top: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+            📋 Sao chép nhanh nội dung xem trước
+        </button>
         """
-        st.markdown("### 👁️ Bản xem trước kết quả Mistral OCR")
-        components.html(mistral_component_html, height=750, scrolling=False)
+        components.html(copy_helper_html, height=60)
 
 
 # ==========================================
