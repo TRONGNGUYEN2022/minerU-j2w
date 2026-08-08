@@ -18,6 +18,13 @@ try:
 except ImportError:
     GEMINI_AVAILABLE = False
 
+# Import thư viện Mistral chính thức
+try:
+    from mistralai import Mistral
+    MISTRAL_AVAILABLE = True
+except ImportError:
+    MISTRAL_AVAILABLE = False
+
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
@@ -33,6 +40,8 @@ if "api_key_editable" not in st.session_state:
     st.session_state.api_key_editable = False
 if "gemini_key_editable" not in st.session_state:
     st.session_state.gemini_key_editable = False
+if "mistral_key_editable" not in st.session_state:
+    st.session_state.mistral_key_editable = False
 if "active_json" not in st.session_state:
     st.session_state.active_json = None
 if "active_images_dict" not in st.session_state:
@@ -40,9 +49,11 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "MinerU_Document"
 
-# Khởi tạo lưu trữ Gemini API Key tự động trong session
+# Khởi tạo lưu trữ API Keys tự động trong session
 if "saved_gemini_key" not in st.session_state:
     st.session_state.saved_gemini_key = ""
+if "saved_mistral_key" not in st.session_state:
+    st.session_state.saved_mistral_key = ""
 
 # --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
 
@@ -165,7 +176,6 @@ def check_task_status_v4(api_token, task_id):
         if response.status_code == 200:
             res_json = response.json()
             data = res_json.get("data", {})
-            # Bắt toàn bộ chi tiết lỗi thô từ server nếu task thất bại
             if data.get("state") == "failed":
                 print(f"DEBUG MINERU ERROR RAW: {res_json}")
             return data
@@ -225,6 +235,84 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         return simulated_json, {}
     except Exception as e:
         st.error(f"Lỗi khi xử lý dự phòng bằng Gemini: {e}")
+        return None, {}
+
+
+# --- 2.2 HÀM XỬ LÝ BẰNG MISTRAL OCR API ---
+def process_with_mistral(uploaded_file, mistral_api_key, selected_model):
+    if not MISTRAL_AVAILABLE:
+        st.error("Chưa cài đặt thư viện `mistralai`. Vui lòng thêm `mistralai` vào requirements.txt")
+        return None, {}
+    
+    try:
+        client = Mistral(api_key=mistral_api_key)
+        file_bytes = uploaded_file.getvalue()
+        file_name = uploaded_file.name
+        
+        # Mã hóa base64 để truyền dữ liệu file trực tiếp lên Mistral OCR
+        base64_data = base64.b64encode(file_bytes).decode("utf-8")
+        file_ext = file_name.split(".")[-1].lower()
+        
+        if file_ext == "pdf":
+            document_payload = {
+                "type": "document_url",
+                "document_url": f"data:application/pdf;base64,{base64_data}"
+            }
+        else:
+            mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "avif": "image/avif"}
+            mime_type = mime_map.get(file_ext, "image/jpeg")
+            document_payload = {
+                "type": "image_url",
+                "image_url": f"data:{mime_type};base64,{base64_data}"
+            }
+
+        ocr_response = client.ocr.process(
+            model=selected_model,
+            document=document_payload,
+            include_image_base64=True
+        )
+        
+        # Gom nội dung Markdown từ các trang trả về của Mistral OCR
+        full_markdown = ""
+        extracted_images = {}
+        
+        if hasattr(ocr_response, "pages"):
+            for page in ocr_response.pages:
+                if hasattr(page, "markdown"):
+                    full_markdown += f"\n\n{page.markdown}"
+                if hasattr(page, "images") and page.images:
+                    for img in page.images:
+                        if hasattr(img, "id") and hasattr(img, "image_base64") and img.image_base64:
+                            img_b64_str = img.image_base64
+                            if "," in img_b64_str:
+                                img_b64_str = img_b64_str.split(",")[1]
+                            try:
+                                extracted_images[f"{img.id}.png"] = base64.b64decode(img_b64_str)
+                            except:
+                                pass
+
+        # Chuyển đổi markdown sang định dạng tương thích hiển thị HTML preview
+        simulated_json = {
+            "pdf_info": [
+                {
+                    "para_blocks": [
+                        {
+                            "type": "text",
+                            "lines": [
+                                {
+                                    "spans": [
+                                        {"type": "text", "content": full_markdown}
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        return simulated_json, extracted_images
+    except Exception as e:
+        st.error(f"Lỗi khi xử lý bằng Mistral OCR: {e}")
         return None, {}
 
 
@@ -393,8 +481,9 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
 
 st.title("📐 Convert PDF/Image to word")
 
-tab1, tab2, tab3 = st.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 Gửi lên MinerU Server (API)", 
+    "🌪️ Mistral OCR Server", 
     "🌐 MinerU Web Extractor", 
     "📁 Tải file layout.json & Ảnh có sẵn (Offline)"
 ])
@@ -429,9 +518,9 @@ with tab1:
         index=0
     )
 
-    api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích", type=["pdf", "png", "jpg", "jpeg"])
+    api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích", type=["pdf", "png", "jpg", "jpeg"], key="tab1_file")
     
-    if st.button("📤 Gửi & Phân tích"):
+    if st.button("📤 Gửi & Phân tích", key="btn_tab1"):
         if not api_file:
             st.warning("Vui lòng chọn file!")
         else:
@@ -466,7 +555,6 @@ with tab1:
                                     st.rerun()
                             break
                         elif state == "failed":
-                            # Bóc tách tường minh chi tiết lỗi từ server
                             err_msg = task_data.get('err_msg') or task_data.get('error') or task_data.get('message') or "Không có mô tả chi tiết từ server"
                             st.warning(f"MinerU báo lỗi chi tiết: {err_msg}. Đang chuyển sang dự phòng bằng Gemini...")
                             break
@@ -481,25 +569,63 @@ with tab1:
                             st.session_state.active_json = g_json
                             st.session_state.active_images_dict = g_imgs
                             st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
-                            st.success(f"Đã hoàn tất trích xuất thay thế bằng {selected_gemini_model} thành công!")
+                            st.success(f"Dự phòng thành công bằng {selected_gemini_model}!")
                             st.rerun()
                 else:
                     st.error("MinerU thất bại và bạn chưa nhập Gemini API Key để dùng làm phương án dự phòng!")
 
 with tab2:
+    st.subheader("🌪️ Cấu hình Mistral OCR Server")
+    
+    def update_mistral_key():
+        st.session_state.saved_mistral_key = st.session_state.mistral_input_field
+
+    mistral_token_input = st.text_input(
+        "Nhập Mistral API Key:", 
+        value=st.session_state.saved_mistral_key, 
+        type="password",
+        key="mistral_input_field",
+        on_change=update_mistral_key
+    )
+    if mistral_token_input:
+        st.session_state.saved_mistral_key = mistral_token_input
+
+    selected_mistral_model = st.selectbox(
+        "Chọn Model Mistral OCR:",
+        ["mistral-ocr-latest", "mistral-ocr-2512"],
+        index=0
+    )
+
+    mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh cần xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg", "avif"], key="tab2_file")
+    
+    if st.button("📤 Gửi & Xử lý qua Mistral", key="btn_tab2"):
+        if not mistral_file:
+            st.warning("Vui lòng chọn file!")
+        elif not st.session_state.saved_mistral_key.strip():
+            st.error("Vui lòng nhập Mistral API Key!")
+        else:
+            with st.spinner("Đang gửi file lên Mistral OCR Server..."):
+                m_json, m_imgs = process_with_mistral(mistral_file, st.session_state.saved_mistral_key.strip(), selected_mistral_model)
+                if m_json:
+                    st.session_state.active_json = m_json
+                    st.session_state.active_images_dict = m_imgs
+                    st.session_state.active_file_name = mistral_file.name.rsplit(".", 1)[0]
+                    st.success("Đã hoàn tất trích xuất qua Mistral OCR thành công!")
+                    st.rerun()
+
+with tab3:
     st.subheader("🌐 MinerU Web Extractor (Nhúng trực tiếp)")
     st.markdown("Trang web chính thức được nhúng bên dưới. Bạn có thể thao tác trực tiếp hoặc bấm vào nút mở tab mới nếu trình duyệt chặn khung nhúng.")
     st.markdown("[🔗 Mở trang MinerU Web Extractor trong tab mới](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
     
-    # Nhúng trực tiếp trang web
     components.iframe("https://mineru.net/OpenSourceTools/Extractor", height=650, scrolling=True)
     
     st.divider()
     st.subheader("📥 Nhận file kết quả từ Web Extractor vào Thư mục Tự động")
     st.markdown(f"Sau khi tải file giải nén từ trang web trên về máy, hãy tải file `layout.json` và thư mục `images` lên đây để hệ thống tự động lưu vào thư mục `{DEFAULT_DOWNLOAD_DIR}/` và xử lý chuyển đổi Word:")
 
-    web_json_f = st.file_uploader("Tải file layout.json từ gói kết quả Web", type=["json"], key="web_json_tab2")
-    web_image_files = st.file_uploader("Tải toàn bộ file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="web_imgs_tab2")
+    web_json_f = st.file_uploader("Tải file layout.json từ gói kết quả Web", type=["json"], key="web_json_tab3")
+    web_image_files = st.file_uploader("Tải toàn bộ file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="web_imgs_tab3")
     
     if web_json_f:
         try:
@@ -527,7 +653,7 @@ with tab2:
         except Exception as e:
             st.error(f"Lỗi khi xử lý file: {e}")
 
-with tab3:
+with tab4:
     json_f = st.file_uploader("Chọn file layout.json", type=["json"], key="offline_json")
     image_files = st.file_uploader("Chọn các file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="offline_imgs")
     if json_f:
