@@ -23,7 +23,7 @@ st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", lay
 MINERU_BASE_URL = "https://mineru.net"
 DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 
-# --- KHỞI TẠO SESSION STATE ---
+# --- KHỞI TẠO SESSION STATE & LƯU KEY ---
 if "api_key_editable" not in st.session_state:
     st.session_state.api_key_editable = False
 if "gemini_key_editable" not in st.session_state:
@@ -37,7 +37,7 @@ if "extracted_images_dir" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "MinerU_Document"
 
-# Khởi tạo lưu trữ Gemini API Key tự động trong session
+# Cơ chế lưu trữ Gemini API Key vĩnh viễn trong session/browser state
 if "saved_gemini_key" not in st.session_state:
     st.session_state.saved_gemini_key = ""
 
@@ -165,7 +165,7 @@ def check_task_status_v4(api_token, task_id):
     return None
 
 
-# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API (TỐI ƯU TOÁN HỌC) ---
+# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
 def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
     if not GEMINI_AVAILABLE:
         st.error("Chưa cài đặt thư viện `google-genai`. Vui lòng thêm `google-genai` vào requirements.txt")
@@ -397,12 +397,19 @@ with tab1:
             st.rerun()
             
     with col_k2:
+        # Nhập Gemini API Key và lưu tự động bằng hàm callback on_change
+        def update_gemini_key():
+            st.session_state.saved_gemini_key = st.session_state.gemini_input_field
+
         gemini_token_input = st.text_input(
             "Nhập Gemini API Key (Dự phòng):", 
             value=st.session_state.saved_gemini_key, 
-            type="password"
+            type="password",
+            key="gemini_input_field",
+            on_change=update_gemini_key
         )
-        if gemini_token_input != st.session_state.saved_gemini_key:
+        # Đồng bộ trực tiếp ngay khi gõ
+        if gemini_token_input:
             st.session_state.saved_gemini_key = gemini_token_input
 
     # Lựa chọn model Gemini
@@ -453,11 +460,12 @@ with tab1:
                             break
                         progress_bar.progress(min((i + 1) * 2, 100))
 
-            # Nếu MinerU lỗi -> Gọi Gemini API với model đã chọn
+            # Nếu MinerU lỗi -> Gọi Gemini API với model đã chọn và key đã lưu
             if not success_processed:
-                if st.session_state.saved_gemini_key.strip():
+                active_key = st.session_state.saved_gemini_key.strip() or gemini_token_input.strip()
+                if active_key:
                     with st.spinner(f"MinerU gặp sự cố. Đang tiến hành trích xuất bằng {selected_gemini_model}..."):
-                        g_json, g_imgs = fallback_process_with_gemini(api_file, st.session_state.saved_gemini_key.strip(), selected_gemini_model)
+                        g_json, g_imgs = fallback_process_with_gemini(api_file, active_key, selected_gemini_model)
                         if g_json:
                             st.session_state.active_json = g_json
                             st.session_state.active_images_dict = g_imgs
