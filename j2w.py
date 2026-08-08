@@ -10,6 +10,14 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+# Import thư viện google-genai chính thức mới nhất
+try:
+    from google import genai
+    from google.genai import types
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
@@ -18,6 +26,8 @@ DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 # --- KHỞI TẠO SESSION STATE ---
 if "api_key_editable" not in st.session_state:
     st.session_state.api_key_editable = False
+if "gemini_key_editable" not in st.session_state:
+    st.session_state.gemini_key_editable = False
 if "active_json" not in st.session_state:
     st.session_state.active_json = None
 if "active_images_dict" not in st.session_state:
@@ -78,7 +88,6 @@ def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
 # --- 2. API MINERU & UPLOAD DỰ PHÒNG ---
 
 def upload_temp_file_robust(uploaded_file):
-    """Hàm upload file tạm thông minh với cơ chế dự phòng nhiều server"""
     upload_services = [
         {
             "name": "Catbox",
@@ -126,7 +135,6 @@ def upload_temp_file_robust(uploaded_file):
         except Exception:
             continue
             
-    st.error("Tất cả các server upload tạm đều đang bận hoặc lỗi. Vui lòng thử lại sau ít phút!")
     return None
 
 def start_mineru_task_by_url(api_token, file_url):
@@ -153,6 +161,63 @@ def check_task_status_v4(api_token, task_id):
     return None
 
 
+# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI PRO API ---
+def fallback_process_with_gemini(uploaded_file, gemini_api_key):
+    if not GEMINI_AVAILABLE:
+        st.error("Chưa cài đặt thư viện `google-genai`. Vui lòng thêm `google-genai` vào requirements.txt")
+        return None, {}
+    
+    try:
+        client = genai.Client(api_key=gemini_api_key)
+        file_bytes = uploaded_file.getvalue()
+        mime_type = uploaded_file.type
+        
+        prompt = (
+            "Bạn là một chuyên gia OCR và chuyển đổi tài liệu học tập. Hãy đọc toàn bộ tài liệu (PDF hoặc Ảnh) này một cách chính xác tuyệt đối. "
+            "Trích xuất toàn bộ nội dung văn bản, tiêu đề, bài tập, bảng biểu và các công thức toán học. "
+            "Đối với các công thức toán học, bắt buộc phải định dạng bằng chuẩn LaTeX (đặt trong dấu $...$ cho inline và $$...$$ cho hiển thị dòng riêng). "
+            "Trình bày kết quả cấu trúc thành một đoạn mã HTML sạch sẽ, trong đó các đoạn văn dùng thẻ <p>, tiêu đề dùng thẻ <h3> hoặc <b>, bảng biểu dùng thẻ <table> được đóng khung viền rõ ràng. "
+            "Không kèm theo lời dẫn giải thừa thãi, chỉ trả về nội dung HTML hoàn chỉnh."
+        )
+
+        response = client.models.generate_content(
+            model='gemini-2.5-pro', # Hoặc gemini-1.5-pro
+            contents=[
+                types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
+                prompt
+            ]
+        )
+        
+        html_content = response.text
+        # Làm sạch markdown code block nếu có
+        html_content = re.sub(r"^```html\s*", "", html_content, flags=re.IGNORECASE)
+        html_content = re.sub(r"\s*```$", "", html_content)
+
+        # Chuyển đổi kết quả sang dạng layout json giả lập tương thích hàm preview sẵn có
+        simulated_json = {
+            "pdf_info": [
+                {
+                    "para_blocks": [
+                        {
+                            "type": "text",
+                            "lines": [
+                                {
+                                    "spans": [
+                                        {"type": "text", "content": html_content}
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+        return simulated_json, {}
+    except Exception as e:
+        st.error(f"Lỗi khi xử lý dự phòng bằng Gemini Pro: {e}")
+        return None, {}
+
+
 # --- 3. HÀM QUÉT ĐƯỜNG DẪN ẢNH TOÀN DIỆN ---
 def collect_image_paths_from_block(block):
     paths = []
@@ -174,7 +239,7 @@ def collect_image_paths_from_block(block):
     return paths
 
 
-# --- 4. RENDER PREVIEW (BẢNG BIỂU TỰ ĐỘNG FIT THEO NỘI DUNG & ĐƯỜNG VIỀN ĐẬM) ---
+# --- 4. RENDER PREVIEW ---
 
 def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
@@ -321,15 +386,17 @@ st.title("📐 Convert PDF/Image to word")
 tab1, tab2 = st.tabs(["🚀 Gửi lên MinerU Server (API)", "📁 Tải file layout.json & Ảnh có sẵn (Offline)"])
 
 with tab1:
-    st.subheader("Cấu hình API Key")
-    col_k1, col_k2 = st.columns([5, 1])
+    st.subheader("Cấu hình API Keys")
+    col_k1, col_k2 = st.columns(2)
     with col_k1:
-        api_token_input = st.text_input("Nhập API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
-    with col_k2:
-        st.write("")
-        st.write("")
-        if st.button("Change / Đổi"):
+        api_token_input = st.text_input("Nhập MinerU API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
+        if st.button("Đổi MinerU Key"):
             st.session_state.api_key_editable = not st.session_state.api_key_editable
+            st.rerun()
+    with col_k2:
+        gemini_token_input = st.text_input("Nhập Gemini Pro API Key (Dự phòng):", value="", type="password", disabled=not st.session_state.gemini_key_editable)
+        if st.button("Đổi Gemini Key"):
+            st.session_state.gemini_key_editable = not st.session_state.gemini_key_editable
             st.rerun()
 
     api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích", type=["pdf", "png", "jpg", "jpeg"])
@@ -338,8 +405,12 @@ with tab1:
         if not api_file:
             st.warning("Vui lòng chọn file!")
         else:
-            with st.spinner("Đang tải file lên máy chủ trung gian (có dự phòng tự động)..."):
+            success_processed = False
+            
+            # Thử xử lý qua MinerU trước
+            with st.spinner("Đang tải file lên máy chủ trung gian..."):
                 file_url = upload_temp_file_robust(api_file)
+                
             if file_url:
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
                     task_id = start_mineru_task_by_url(api_token_input, file_url)
@@ -351,7 +422,7 @@ with tab1:
                         time.sleep(3)
                         task_data = check_task_status_v4(api_token_input, task_id)
                         state = task_data.get("state")
-                        status_text.text(f"Trạng thái: {state}")
+                        status_text.text(f"Trạng thái MinerU: {state}")
                         if state == "done":
                             full_zip_url = task_data.get("full_zip_url")
                             r_zip = requests.get(full_zip_url)
@@ -361,13 +432,28 @@ with tab1:
                                     st.session_state.active_json = found_json
                                     st.session_state.active_images_dict = images_dict
                                     st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
-                                    st.success("Đã hoàn tất phân tích!")
+                                    st.success("Đã hoàn tất phân tích bằng MinerU!")
+                                    success_processed = True
                                     st.rerun()
                             break
                         elif state == "failed":
-                            st.error(f"Xử lý thất bại: {task_data.get('err_msg')}")
+                            st.warning(f"MinerU báo lỗi: {task_data.get('err_msg')}. Đang chuyển sang dự phòng bằng Gemini Pro...")
                             break
                         progress_bar.progress(min((i + 1) * 2, 100))
+
+            # Nếu MinerU lỗi hoặc không lấy được kết quả và người dùng có nhập Gemini Key -> Dùng Gemini Pro làm phương án dự phòng
+            if not success_processed:
+                if gemini_token_input.strip():
+                    with st.spinner("MinerU gặp sự cố. Đang tiến hành trích xuất bằng Gemini Pro API..."):
+                        g_json, g_imgs = fallback_process_with_gemini(api_file, gemini_token_input.strip())
+                        if g_json:
+                            st.session_state.active_json = g_json
+                            st.session_state.active_images_dict = g_imgs
+                            st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
+                            st.success("Đã hoàn tất trích xuất thay thế bằng Gemini Pro thành công!")
+                            st.rerun()
+                else:
+                    st.error("MinerU thất bại và bạn chưa nhập Gemini Pro API Key để dùng làm phương án dự phòng!")
 
 with tab2:
     json_f = st.file_uploader("Chọn file layout.json", type=["json"])
