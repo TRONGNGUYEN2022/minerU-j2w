@@ -31,7 +31,7 @@ st.set_page_config(page_title="Convert PDF/Image to word (MinerU - Mistral - Gem
 MINERU_BASE_URL = "https://mineru.net"
 DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 
-# Tạo thư mục mặc định để lưu file tải về từ MinerU Web Extractor
+# Tạo thư mục mặc định để lưu file tải về
 DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
 os.makedirs(DEFAULT_DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(DEFAULT_DOWNLOAD_DIR, "images"), exist_ok=True)
@@ -50,21 +50,20 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "Document"
 
-# Khởi tạo lưu trữ API Keys tự động trong session
+# Lưu trữ API Keys tự động
 if "saved_gemini_key" not in st.session_state:
     st.session_state.saved_gemini_key = ""
 if "saved_mistral_key" not in st.session_state:
     st.session_state.saved_mistral_key = ""
 
-# Biến dành riêng cho kết quả hiển thị từ tab Mistral OCR
+# Biến riêng cho Mistral OCR
 if "mistral_preview_markdown" not in st.session_state:
     st.session_state.mistral_preview_markdown = ""
 if "mistral_docx_bytes" not in st.session_state:
     st.session_state.mistral_docx_bytes = None
 
 
-# --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG (MINERU & GEMINI) ---
-
+# --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
 def clean_and_wrap_latex(latex_str):
     if not latex_str: return ""
     clean_str = latex_str.strip()
@@ -112,7 +111,6 @@ def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
     return None
 
 # --- 2. API MINERU & UPLOAD DỰ PHÒNG ---
-
 def upload_temp_file_robust(uploaded_file):
     upload_services = [
         {"name": "Catbox", "url": "https://catbox.moe/user/api.php", "data": {"reqtype": "fileupload"}, "file_key": "fileToUpload"},
@@ -168,10 +166,9 @@ def check_task_status_v4(api_token, task_id):
         if response.status_code == 200:
             res_json = response.json()
             return res_json.get("data", {})
-    except Exception as e:
-        print(f"Lỗi kiểm tra task: {e}")
+    except Exception:
+        pass
     return {}
-
 
 # --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
 def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
@@ -185,9 +182,9 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         mime_type = uploaded_file.type
         
         prompt = (
-            "Bạn là một chuyên gia OCR và chuyển đổi tài liệu toán học. Hãy đọc tài liệu này thật chính xác tuyệt đối. "
-            "Yêu cầu cực kỳ quan trọng đối với công thức toán học: Tất cả các biểu thức toán học, phân số, số mũ, ký hiệu BẮT BUỘC phải được đặt trong cặp dấu đô la ($...$ cho inline hoặc $$...$$ cho block). "
-            "Trình bày kết quả cấu trúc thành một đoạn mã HTML sạch sẽ dùng thẻ <p>, <h3>, bảng dùng <table>. Chỉ trả về HTML hoàn chỉnh."
+            "Bạn là chuyên gia OCR và chuyển đổi tài liệu toán học. Hãy đọc tài liệu này chính xác tuyệt đối. "
+            "Tất cả các biểu thức toán học BẮT BUỘC phải được đặt trong cặp dấu đô la ($...$ cho inline hoặc $$...$$ cho block). "
+            "Trình bày kết quả bằng HTML sạch sẽ dùng thẻ <p>, <h3>, bảng dùng <table> có viền rõ ràng. Chỉ trả về HTML hoàn chỉnh."
         )
 
         response = client.models.generate_content(
@@ -209,9 +206,8 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         }
         return simulated_json, {}
     except Exception as e:
-        st.error(f"Lỗi khi xử lý dự phòng bằng Gemini: {e}")
+        st.error(f"Lỗi khi xử lý bằng Gemini: {e}")
         return None, {}
-
 
 # --- 3. HÀM QUÉT ĐƯỜNG DẪN ẢNH (MINERU) ---
 def collect_image_paths_from_block(block):
@@ -232,7 +228,6 @@ def collect_image_paths_from_block(block):
                         val = span.get(key)
                         if val: paths.append(val)
     return paths
-
 
 # --- 4. RENDER PREVIEW CHO MINERU / GEMINI ---
 def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_name="document"):
@@ -301,6 +296,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="utf-8">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}]}});"></script>
@@ -328,6 +324,10 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
             window.getSelection().addRange(range);
             try {{ document.execCommand('copy'); }} catch (err) {{}}
             window.getSelection().removeAllRanges();
+            const status = document.getElementById('status-msg');
+            status.innerText = "✔ Đã sao chép!";
+            status.style.display = 'inline';
+            setTimeout(() => {{ status.style.display = 'none'; }}, 3000);
         }}
         function saveAsWordDocx() {{
             const contentHTML = document.getElementById('preview-box').innerHTML;
@@ -346,9 +346,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     st.markdown("### 👁️ Bản xem trước Nội dung MinerU / Gemini")
     components.html(copier_component, height=750, scrolling=False)
 
-
 # --- 5. GIAO DIỆN CHÍNH (4 TABS) ---
-
 st.title("📐 Convert PDF/Image to word (MinerU - Mistral - Gemini)")
 
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -358,7 +356,9 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📁 Tải file có sẵn (Offline)"
 ])
 
-# --- TAB 1: MINERU SERVER & GEMINI ---
+# ==========================================
+# TAB 1: MINERU SERVER & GEMINI
+# ==========================================
 with tab1:
     st.subheader("Cấu hình API Keys (MinerU & Gemini dự phòng)")
     col_k1, col_k2 = st.columns(2)
@@ -429,7 +429,9 @@ with tab1:
                     st.error("MinerU thất bại và chưa có Gemini API Key dự phòng!")
 
 
-# --- TAB 2: MISTRAL OCR (API + Pandoc) ---
+# ==========================================
+# TAB 2: MISTRAL OCR (API + Preview xịn sò)
+# ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
     def update_mistral_key():
@@ -439,7 +441,7 @@ with tab2:
 
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="mistral_upload")
     
-    if st.button("🚀 Gửi PDF lên Mistral OCR & Xuất Word"):
+    if st.button("🚀 Gửi PDF lên Mistral OCR & Phân tích"):
         active_m_key = st.session_state.saved_mistral_key.strip()
         if not mistral_file:
             st.warning("Vui lòng chọn file!")
@@ -448,7 +450,7 @@ with tab2:
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
-            with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và biên dịch file Word..."):
+            with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và xử lý nội dung..."):
                 try:
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
@@ -485,6 +487,7 @@ with tab2:
                                                 img_f.write(img_bytes)
                                         except: pass
 
+                    # Biên dịch file Word dự phòng bằng Pandoc
                     temp_md_path = "temp_input.md"
                     with open(temp_md_path, "w", encoding="utf-8") as f:
                         f.write(full_markdown)
@@ -501,28 +504,17 @@ with tab2:
                     st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
                     
                     if os.path.exists(temp_md_path): os.remove(temp_md_path)
-                    st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
+                    st.success("🎉 Xử lý Mistral OCR thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Preview riêng cho Mistral nếu có
+    # Hiển thị Khung Preview xịn sò đồng bộ với MinerU
     if st.session_state.mistral_preview_markdown:
         st.divider()
-        col_m1, col_m2 = st.columns([2, 1])
-        with col_m1:
-            st.subheader("👁️ Bản xem trước kết quả Mistral OCR")
-        with col_m2:
-            if st.session_state.mistral_docx_bytes:
-                st.download_button(
-                    label="📥 Tải xuống file Word (.docx)",
-                    data=st.session_state.mistral_docx_bytes,
-                    file_name=f"{st.session_state.active_file_name}_Mistral.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
-
-        preview_md = st.session_state.mistral_preview_markdown
-        def replace_img_smart(match):
+        
+        raw_md = st.session_state.mistral_preview_markdown
+        
+        def replace_img_smart_html(match):
             alt_text = match.group(1)
             raw_path = match.group(2)
             target_name = os.path.basename(raw_path)
@@ -533,18 +525,97 @@ with tab2:
                     break
             if matched_bytes:
                 b64_data = base64.b64encode(matched_bytes).decode('utf-8')
-                return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" alt="{alt_text}" /></div>'
+                return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 8px; border: 1px solid #2d3748;" alt="{alt_text}" /></div>'
             return match.group(0)
 
-        preview_md = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart, preview_md)
-        preview_md = preview_md.replace(r"\(", "$").replace(r"\)", "$")
-        preview_md = preview_md.replace(r"\[", "$$").replace(r"\]", "$$")
+        processed_html = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart_html, raw_md)
+        processed_html = processed_html.replace(r"\(", "$").replace(r"\)", "$")
+        processed_html = processed_html.replace(r"\[", "$$").replace(r"\]", "$$")
+        
+        html_lines = processed_html.split("\n")
+        formatted_body_html = ""
+        for line in html_lines:
+            if line.strip().startswith("###"):
+                formatted_body_html += f"<h3 style='color: #2b6cb0; margin-top: 20px;'>{line.replace('###', '').strip()}</h3>"
+            elif line.strip().startswith("##"):
+                formatted_body_html += f"<h2 style='color: #2c5282; margin-top: 25px;'>{line.replace('##', '').strip()}</h2>"
+            elif line.strip().startswith("<hr/>"):
+                formatted_body_html += "<hr style='border: 0; border-top: 1px solid #cbd5e0; margin: 20px 0;'/>"
+            elif line.strip():
+                formatted_body_html += f"<p style='margin-bottom: 10px;'>{line}</p>"
 
-        with st.container(border=True):
-            st.markdown(preview_md, unsafe_allow_html=True)
+        mistral_component_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}, {{left: '$$', right: '$$', display: true}}]}});"></script>
+            <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; color: #2d3748; }}
+                .btn-action {{ padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                .btn-copy {{ background-color: #2b6cb0; }}
+                .btn-copy:hover {{ background-color: #2c5282; }}
+                .btn-word {{ background-color: #2f855a; }}
+                .btn-word:hover {{ background-color: #276749; }}
+                #status-msg {{ margin-left: 10px; color: #2f855a; font-weight: bold; font-size: 13px; display: none; }}
+                .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; line-height: 1.8; }}
+                table {{ border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748; }}
+                th {{ border: 2px solid #2d3748; padding: 6px 10px; background-color: #edf2f7; font-weight: bold; text-align: center; }}
+                td {{ border: 2px solid #2d3748; padding: 6px 10px; vertical-align: middle; }}
+            </style>
+        </head>
+        <body>
+            <div>
+                <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
+                <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu thành file Word (.docx)</button>
+                <span id="status-msg">✔ Thao tác thành công!</span>
+            </div>
+            <div class="preview-card" id="content-to-copy">
+                {formatted_body_html}
+            </div>
+            <script>
+            function copyContentToClipboard() {{
+                const range = document.createRange();
+                range.selectNode(document.getElementById('content-to-copy'));
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                try {{
+                    document.execCommand('copy');
+                    showStatus("Đã sao chép vào bộ nhớ tạm! Mở Word và nhấn Ctrl+V");
+                }} catch (err) {{ alert('Không thể sao chép tự động!'); }}
+                window.getSelection().removeAllRanges();
+            }}
+            function saveAsWordDocx() {{
+                const contentHTML = document.getElementById('content-to-copy').innerHTML;
+                const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(converted);
+                link.download = "{st.session_state.active_file_name}_Mistral.docx";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showStatus("Đã tải xuống file Word thành công!");
+            }}
+            function showStatus(msg) {{
+                const status = document.getElementById('status-msg');
+                status.innerText = "✔ " + msg;
+                status.style.display = 'inline';
+                setTimeout(() => {{ status.style.display = 'none'; }}, 4000);
+            }}
+            </script>
+        </body>
+        </html>
+        """
+        st.markdown("### 👁️ Bản xem trước kết quả Mistral OCR")
+        components.html(mistral_component_html, height=750, scrolling=False)
 
 
-# --- TAB 3: MINERU WEB EXTRACTOR ---
+# ==========================================
+# TAB 3: MINERU WEB EXTRACTOR
+# ==========================================
 with tab3:
     st.subheader("🌐 MinerU Web Extractor (Nhúng trực tiếp)")
     st.markdown("[🔗 Mở trang MinerU Web Extractor trong tab mới](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
@@ -568,7 +639,9 @@ with tab3:
             st.error(f"Lỗi: {e}")
 
 
-# --- TAB 4: TẢI FILE CÓ SẴN (OFFLINE) ---
+# ==========================================
+# TAB 4: TẢI FILE CÓ SẴN (OFFLINE)
+# ==========================================
 with tab4:
     st.subheader("📁 Nạp file layout.json hoặc file ZIP kết quả Offline")
     offline_file = st.file_uploader("Chọn file layout.json hoặc file ZIP kết quả", type=["json", "zip"], key="offline_all")
@@ -596,7 +669,9 @@ with tab4:
             st.error(f"Lỗi khi đọc file: {e}")
 
 
-# Hiển thị Preview chung cho MinerU / Gemini nếu có dữ liệu layout.json active
+# ==========================================
+# HIỂN THỊ PREVIEW CHO MINERU / GEMINI
+# ==========================================
 if st.session_state.active_json is not None:
     st.divider()
     render_pure_math_preview(
