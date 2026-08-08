@@ -54,7 +54,7 @@ def unify_mistral_zip(zip_bytes):
             if meta_path in namelist:
                 try:
                     meta_content = json.loads(z.read(meta_path).decode("utf-8"))
-                    page_blocks = meta_content.get("blocks",[cite: 4])
+                    page_blocks = meta_content.get("blocks", [])
                 except: pass
                 
             page_images = {}
@@ -65,7 +65,6 @@ def unify_mistral_zip(zip_bytes):
                     page_images[img_name] = img_bytes
                     images_dict[img_name] = img_bytes
                     
-                    # Lưu vào thư mục vật lý 'images'
                     with open(os.path.join(UNIFIED_IMAGE_DIR, img_name), "wb") as img_f:
                         img_f.write(img_bytes)
                         
@@ -180,8 +179,6 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
             elif b_type in ["header", "footer"]:
                 preview_inner_html += f"<div style='font-size: 13px; color: #a0aec0; margin: 5px 0;'>{content}</div>"
             else:
-                # Xử lý các công thức LaTeX thô thành dạng hiển thị KaTeX chuẩn equation
-                # Đảm bảo các công thức chưa được bọc $ sẽ được nhận diện hoặc giữ nguyên định dạng
                 formatted_content = content.replace("\n", "<br>")
                 preview_inner_html += f"<div style='margin-bottom: 10px;'>{formatted_content}</div>"
                 
