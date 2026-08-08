@@ -26,10 +26,40 @@ try:
 except ImportError:
     MISTRAL_AVAILABLE = False
 
+# --- CẤU HÌNH LƯU KEY RA FILE TRÊN SERVER ---
+CONFIG_FILE = "config_keys.json"
+
+def load_saved_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+def save_config(gemini_key, mistral_key, mineru_key):
+    config_data = {
+        "gemini_key": gemini_key,
+        "mistral_key": mistral_key,
+        "mineru_key": mineru_key
+    }
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+    except:
+        pass
+
+# Đọc cấu hình đã lưu trên server (nếu có)
+saved_config = load_saved_config()
+
+DEFAULT_MINERU_KEY = saved_config.get("mineru_key", "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O")
+DEFAULT_GEMINI_KEY = saved_config.get("gemini_key", "AQ.Ab8RN6IiVh_ufztKik5rSMrl39c-U6_L6v5oy_Qru1-YNUBdRg")
+DEFAULT_MISTRAL_KEY = saved_config.get("mistral_key", "Asht2uDLjH8WTWnU06dBWdPbpcVQrbt5")
+
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word (MinerU - Mistral - Gemini)", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
-DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 
 # Tạo thư mục mặc định để lưu file tải về
 DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
@@ -43,6 +73,7 @@ if "gemini_key_editable" not in st.session_state:
     st.session_state.gemini_key_editable = False
 if "mistral_key_editable" not in st.session_state:
     st.session_state.mistral_key_editable = False
+
 if "active_json" not in st.session_state:
     st.session_state.active_json = None
 if "active_images_dict" not in st.session_state:
@@ -50,11 +81,13 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "Document"
 
-# Lưu trữ API Keys tự động
+# Lưu trữ Key vào Session State
 if "saved_gemini_key" not in st.session_state:
-    st.session_state.saved_gemini_key = ""
+    st.session_state.saved_gemini_key = DEFAULT_GEMINI_KEY
 if "saved_mistral_key" not in st.session_state:
-    st.session_state.saved_mistral_key = ""
+    st.session_state.saved_mistral_key = DEFAULT_MISTRAL_KEY
+if "saved_mineru_key" not in st.session_state:
+    st.session_state.saved_mineru_key = DEFAULT_MINERU_KEY
 
 # Biến riêng cho Mistral OCR
 if "mistral_preview_markdown" not in st.session_state:
@@ -363,16 +396,32 @@ with tab1:
     st.subheader("Cấu hình API Keys (MinerU & Gemini dự phòng)")
     col_k1, col_k2 = st.columns(2)
     with col_k1:
-        api_token_input = st.text_input("Nhập MinerU API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
+        api_token_input = st.text_input("Nhập MinerU API Token:", value=st.session_state.saved_mineru_key, type="password", disabled=not st.session_state.api_key_editable)
         if st.button("Đổi MinerU Key"):
             st.session_state.api_key_editable = not st.session_state.api_key_editable
+            st.rerun()
+        if st.session_state.api_key_editable and st.button("Lưu MinerU Key"):
+            st.session_state.saved_mineru_key = api_token_input
+            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+            st.session_state.api_key_editable = False
+            st.success("Đã lưu MinerU Key vào server!")
             st.rerun()
             
     with col_k2:
         def update_gemini_key():
             st.session_state.saved_gemini_key = st.session_state.gemini_input_field
-        gemini_token_input = st.text_input("Nhập Gemini API Key (Dự phòng):", value=st.session_state.saved_gemini_key, type="password", key="gemini_input_field", on_change=update_gemini_key)
-        if gemini_token_input: st.session_state.saved_gemini_key = gemini_token_input
+            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+
+        gemini_token_input = st.text_input("Nhập Gemini API Key (Dự phòng):", value=st.session_state.saved_gemini_key, type="password", disabled=not st.session_state.gemini_key_editable, key="gemini_input_field", on_change=update_gemini_key)
+        if st.button("Đổi Gemini Key"):
+            st.session_state.gemini_key_editable = not st.session_state.gemini_key_editable
+            st.rerun()
+        if st.session_state.gemini_key_editable and st.button("Lưu Gemini Key"):
+            st.session_state.saved_gemini_key = gemini_token_input
+            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+            st.session_state.gemini_key_editable = False
+            st.success("Đã lưu Gemini Key vào server!")
+            st.rerun()
 
     selected_gemini_model = st.selectbox("Chọn Model Gemini dự phòng:", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"], index=0)
     api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích qua MinerU", type=["pdf", "png", "jpg", "jpeg"], key="tab1_upload")
@@ -387,14 +436,14 @@ with tab1:
                 
             if file_url:
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
-                    task_id = start_mineru_task_by_url(api_token_input, file_url)
+                    task_id = start_mineru_task_by_url(st.session_state.saved_mineru_key, file_url)
                 if task_id:
                     st.success(f"Khởi tạo thành công! Task ID: `{task_id}`")
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     for i in range(40):
                         time.sleep(3)
-                        task_data = check_task_status_v4(api_token_input, task_id)
+                        task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
                         state = task_data.get("state")
                         status_text.text(f"Trạng thái MinerU: {state}")
                         if state == "done":
@@ -415,7 +464,7 @@ with tab1:
                         progress_bar.progress(min((i + 1) * 2, 100))
 
             if not success_processed:
-                active_key = st.session_state.saved_gemini_key.strip() or gemini_token_input.strip()
+                active_key = st.session_state.saved_gemini_key.strip()
                 if active_key:
                     with st.spinner(f"MinerU gặp sự cố. Đang tiến hành trích xuất dự phòng bằng {selected_gemini_model}..."):
                         g_json, g_imgs = fallback_process_with_gemini(api_file, active_key, selected_gemini_model)
@@ -436,8 +485,18 @@ with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
     def update_mistral_key():
         st.session_state.saved_mistral_key = st.session_state.mistral_input_field
-    mistral_token_input = st.text_input("Nhập Mistral API Key:", value=st.session_state.saved_mistral_key, type="password", key="mistral_input_field", on_change=update_mistral_key)
-    if mistral_token_input: st.session_state.saved_mistral_key = mistral_token_input
+        save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+
+    mistral_token_input = st.text_input("Nhập Mistral API Key:", value=st.session_state.saved_mistral_key, type="password", disabled=not st.session_state.mistral_key_editable, key="mistral_input_field", on_change=update_mistral_key)
+    if st.button("Đổi Mistral Key"):
+        st.session_state.mistral_key_editable = not st.session_state.mistral_key_editable
+        st.rerun()
+    if st.session_state.mistral_key_editable and st.button("Lưu Mistral Key"):
+        st.session_state.saved_mistral_key = mistral_token_input
+        save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+        st.session_state.mistral_key_editable = False
+        st.success("Đã lưu Mistral Key vào server!")
+        st.rerun()
 
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="mistral_upload")
     
