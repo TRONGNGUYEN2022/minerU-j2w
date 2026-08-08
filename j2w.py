@@ -12,9 +12,9 @@ except ImportError:
 
 st.set_page_config(page_title="Convert PDF to Word", page_icon="📐", layout="wide")
 
-st.title("📐 Convert PDF to Word (Mistral OCR + Pandoc + HTML Image Preview)")
+st.title("📐 Convert PDF to Word (Mistral OCR + Pandoc + Smart Image Preview)")
 
-# Khởi tạo các giá trị trong Session State để tránh lỗi AttributeError
+# Khởi tạo Session State
 if "preview_markdown" not in st.session_state:
     st.session_state.preview_markdown = ""
 if "images_dict" not in st.session_state:
@@ -24,20 +24,17 @@ if "docx_bytes" not in st.session_state:
 if "file_name" not in st.session_state:
     st.session_state.file_name = "Document"
 
-# Cấu hình API Key
 mistral_api_key = st.text_input("Nhập Mistral API Key:", type="password")
-
 uploaded_pdf = st.file_uploader("Chọn file PDF cần chuyển đổi", type=["pdf"])
 
 if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
     if not mistral_api_key:
-        st.error("Vui lòng nhập Mistral API Key!")
+        st.error("Nhập Mistral API Key đi bạn ơi!")
     elif not MISTRAL_AVAILABLE:
         st.error("Chưa cài đặt thư viện `mistralai` trong requirements.txt!")
     else:
-        with st.spinner("Đang gửi PDF lên Mistral OCR API, xử lý tài liệu và tạo file Word..."):
+        with st.spinner("Đang gửi PDF lên Mistral OCR, bóc tách ảnh và tạo file Word..."):
             try:
-                # 1. Gọi API Mistral OCR
                 client = Mistral(api_key=mistral_api_key)
                 file_bytes = uploaded_pdf.getvalue()
                 base64_file = base64.b64encode(file_bytes).decode('utf-8')
@@ -52,7 +49,6 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
                     include_blocks=True
                 )
                 
-                # 2. Tổng hợp nội dung Markdown và lưu toàn bộ ảnh vật lý ra thư mục gốc
                 full_markdown = ""
                 root_dir = "."
                 images_dict = {}
@@ -60,7 +56,6 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
                 if hasattr(ocr_response, "pages"):
                     for idx, page in enumerate(ocr_response.pages):
                         page_md = page.markdown if hasattr(page, "markdown") else ""
-                        # Thay thế dòng phân cách '---' để tránh lỗi YAML parse của Pandoc
                         page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                         full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                         
@@ -75,12 +70,12 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
                                         img_filename = f"{img_id}.jpeg"
                                         images_dict[img_filename] = img_bytes
                                         
-                                        # Lưu file ảnh vật lý ra thư mục gốc để Pandoc nhúng vào docx
+                                        # Lưu file ảnh vật lý ra thư mục gốc để Pandoc nhúng vào file Word
                                         with open(os.path.join(root_dir, img_filename), "wb") as img_f:
                                             img_f.write(img_bytes)
                                     except: pass
 
-                # 3. Dùng Pandoc biên dịch file Word (.docx)
+                # Dùng Pandoc biên dịch file Word (.docx)
                 temp_md_path = "temp_input.md"
                 with open(temp_md_path, "w", encoding="utf-8") as f:
                     f.write(full_markdown)
@@ -96,7 +91,6 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
                 with open(output_docx, "rb") as f:
                     docx_bytes = f.read()
 
-                # Lưu vào Session State
                 st.session_state.preview_markdown = full_markdown
                 st.session_state.images_dict = images_dict
                 st.session_state.docx_bytes = docx_bytes
@@ -105,13 +99,13 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
                 if os.path.exists(temp_md_path):
                     os.remove(temp_md_path)
                     
-                st.success("🎉 Xử lý thành công! Hình ảnh hiển thị trực quan và file Word sẵn sàng tải về.")
+                st.success("🎉 Xử lý thành công toàn bộ tài liệu và hình ảnh!")
                 
             except Exception as e:
-                st.error(f"Đã xảy ra lỗi trong quá trình xử lý: {e}")
+                st.error(f"Đã xảy ra lỗi: {e}")
 
 # ==========================================
-# 👁️ KHUNG PREVIEW HIỂN THỊ ẢNH BẰNG THẺ HTML & EQUATION
+# 👁️ KHUNG PREVIEW HIỂN THỊ ẢNH THÔNG MINH
 # ==========================================
 if st.session_state.preview_markdown:
     st.divider()
@@ -131,17 +125,26 @@ if st.session_state.preview_markdown:
 
     preview_md = st.session_state.preview_markdown
     
-    # Chuyển đổi các thẻ ![alt](filename) thành thẻ HTML <img src="data:image/jpeg;base64,..."> hiển thị ảnh chính xác vị trí
-    def replace_img_to_html(match):
-        img_filename = os.path.basename(match.group(2))
-        if img_filename in st.session_state.images_dict:
-            b64_data = base64.b64encode(st.session_state.images_dict[img_filename]).decode('utf-8')
-            return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>'
+    # Hàm tìm kiếm và thay thế tên file ảnh linh hoạt (khớp tên bất kể đường dẫn)
+    def replace_img_smart(match):
+        alt_text = match.group(1)
+        raw_path = match.group(2)
+        target_name = os.path.basename(raw_path)
+        
+        matched_bytes = None
+        for k, v in st.session_state.images_dict.items():
+            if target_name in k or k in target_name:
+                matched_bytes = v
+                break
+                
+        if matched_bytes:
+            b64_data = base64.b64encode(matched_bytes).decode('utf-8')
+            return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" alt="{alt_text}" /></div>'
         return match.group(0)
 
-    preview_md = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_to_html, preview_md)
+    preview_md = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart, preview_md)
     
-    # Chuẩn hóa công thức toán học hiển thị chuẩn KaTeX trên Streamlit
+    # Chuẩn hóa công thức toán học KaTeX
     preview_md = preview_md.replace(r"\(", "$").replace(r"\)", "$")
     preview_md = preview_md.replace(r"\[", "$$").replace(r"\]", "$$")
 
