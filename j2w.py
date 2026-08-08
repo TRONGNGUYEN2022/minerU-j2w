@@ -46,7 +46,6 @@ def process_sequential_mistral_zip(zip_bytes):
             if match:
                 page_dirs.add(match.group(1))
         
-        # Sắp xếp cuốn chiếu từ trang 1 đến trang cuối
         sorted_pages = sorted(list(page_dirs), key=lambda x: int(x.split("-")[1]))
         
         for p_dir in sorted_pages:
@@ -57,22 +56,19 @@ def process_sequential_mistral_zip(zip_bytes):
                 "images": {}
             }
             
-            # 1. Đọc metadata blocks nếu có
             meta_path = f"pages/{p_dir}/page-metadata.json"
             if meta_path in namelist:
                 try:
                     meta_content = json.loads(z.read(meta_path).decode("utf-8"))
-                    page_data["blocks"] = meta_content.get("blocks", [])
+                    page_data["blocks"] = meta_content.get("blocks", [])[cite: 4]
                 except: pass
                 
-            # 2. Đọc file markdown của trang làm nội dung dự phòng/bổ sung
             md_path = f"pages/{p_dir}/markdown.md"
             if md_path in namelist:
                 try:
                     page_data["markdown"] = z.read(md_path).decode("utf-8")
                 except: pass
                 
-            # 3. Trích xuất toàn bộ ảnh của riêng trang này và lưu vào thư mục images
             for f in namelist:
                 if f.startswith(f"pages/{p_dir}/") and (f.endswith(".jpeg") or f.endswith(".png") or f.endswith(".jpg")):
                     img_name = os.path.basename(f)
@@ -139,7 +135,6 @@ def process_sequential_mistral_api(uploaded_file, mistral_api_key, selected_mode
                                 })
                             except: pass
                             
-                # Thêm block text từ markdown
                 if page_data["markdown"]:
                     page_data["blocks"].append({
                         "type": "text",
@@ -164,7 +159,7 @@ def get_image_bytes_helper(img_name, images_dict):
             return f.read()
     return None
 
-# --- RENDER PREVIEW CUỐN CHIẾU TỪNG TRANG CHUẨN XÁC ---
+# --- RENDER PREVIEW CUỐN CHIẾU TỪNG TRANG (THAY THẾ CHUẨN MARKDOWN ẢNH) ---
 def render_sequential_preview(sequential_pages, images_dict, file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
     
@@ -178,7 +173,6 @@ def render_sequential_preview(sequential_pages, images_dict, file_name="document
         preview_inner_html += f"<hr/><h3 style='color: #2b6cb0; margin-top: 25px;'>Trang {page_num}</h3>"
         
         if blocks:
-            # Xử lý theo danh sách blocks tuần tự của trang
             for block in blocks:
                 b_type = block.get("type")
                 content = block.get("content", "")
@@ -196,21 +190,29 @@ def render_sequential_preview(sequential_pages, images_dict, file_name="document
                 elif b_type in ["header", "footer"]:
                     preview_inner_html += f"<div style='font-size: 13px; color: #a0aec0; margin: 5px 0;'>{content}</div>"
                 else:
-                    # Kiểm tra và thay thế ảnh trong text nếu có
-                    for img_name, ibytes in all_imgs.items():
-                        if img_name in content:
+                    # Bóc tách và thay thế toàn bộ các chuỗi ![img-X.jpeg](img-X.jpeg) thành ảnh thực tế
+                    def replace_img_tag(match):
+                        img_filename = match.group(1)
+                        ibytes = get_image_bytes_helper(img_filename, all_imgs)
+                        if ibytes:
                             enc = base64.b64encode(ibytes).decode("utf-8")
-                            content = content.replace(f"![{img_name}]({img_name})", f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{enc}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>')
-                    
+                            return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{enc}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>'
+                        return match.group(0)
+
+                    content = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_tag, content)
                     formatted_content = content.replace("\n", "<br>")
                     preview_inner_html += f"<div style='margin-bottom: 10px;'>{formatted_content}</div>"
         else:
-            # Fallback dùng file markdown nếu không có blocks metadata
             md_content = page.get("markdown", "")
-            for img_name, ibytes in all_imgs.items():
-                if img_name in md_content:
+            def replace_img_tag_md(match):
+                img_filename = match.group(1)
+                ibytes = get_image_bytes_helper(img_filename, all_imgs)
+                if ibytes:
                     enc = base64.b64encode(ibytes).decode("utf-8")
-                    md_content = md_content.replace(f"({img_name})", f"(data:image/jpeg;base64,{enc})")
+                    return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{enc}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>'
+                return match.group(0)
+
+            md_content = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_tag_md, md_content)
             preview_inner_html += f"<div style='margin-bottom: 10px;'>{md_content.replace(chr(10), '<br>')}</div>"
                 
     preview_inner_html += '</div>'
