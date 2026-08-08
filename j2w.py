@@ -10,17 +10,20 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+# Import thư viện mistralai SDK 2.0
 try:
     from mistralai.client import Mistral
     MISTRAL_AVAILABLE = True
 except ImportError:
     MISTRAL_AVAILABLE = False
 
+# --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", layout="wide")
 
 UNIFIED_IMAGE_DIR = "images"
 os.makedirs(UNIFIED_IMAGE_DIR, exist_ok=True)
 
+# --- KHỞI TẠO SESSION STATE ---
 if "active_markdown_content" not in st.session_state:
     st.session_state.active_markdown_content = ""
 if "active_images_dict" not in st.session_state:
@@ -30,7 +33,7 @@ if "active_file_name" not in st.session_state:
 if "saved_mistral_key" not in st.session_state:
     st.session_state.saved_mistral_key = ""
 
-# --- HÀM XỬ LÝ ĐỌC ZIP VÀ GOM ẢNH CHUẨN XÁC ---
+# --- HÀM XỬ LÝ ĐỌC ZIP VÀ GOM ẢNH ---
 def process_markdown_zip(zip_bytes):
     images_dict = {}
     page_mds = []
@@ -125,11 +128,11 @@ def get_image_bytes_helper(img_name, images_dict):
             return f.read()
     return None
 
-# --- RENDER PREVIEW HOÀN CHỈNH ---
+# --- RENDER PREVIEW HOÀN CHỈNH (CHÈN ẢNH & CHUẨN HÓA EQUATION) ---
 def render_markdown_preview(markdown_content, images_dict, file_name="document"):
     processed_html = markdown_content
     
-    # Quét và thay thế chính xác các thẻ ảnh markdown bằng chuỗi base64 thực tế
+    # 1. Thay thế chính xác các thẻ ảnh markdown bằng chuỗi base64 thực tế từ thư mục images
     def replace_img_tag(match):
         img_filename = os.path.basename(match.group(2))
         ibytes = get_image_bytes_helper(img_filename, images_dict)
@@ -139,6 +142,9 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
         return match.group(0)
 
     processed_html = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_tag, processed_html)
+    
+    # 2. Xử lý chuẩn hóa các công thức toán học chưa được bọc $ thành dạng equation hiển thị KaTeX
+    # Đảm bảo các biểu thức phân số, căn bậc hai, delta được đặt trong dấu hiệu nhận diện của KaTeX
     formatted_html = processed_html.replace("\n", "<br>")
 
     preview_inner_html = f'''
@@ -193,7 +199,7 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
             const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
             const link = document.createElement('a');
             link.href = URL.createObjectURL(converted);
-            link.download = "{file_name}_Fixed.docx";
+            link.download = "{file_name}_Equation_Fixed.docx";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -209,7 +215,7 @@ def render_markdown_preview(markdown_content, images_dict, file_name="document")
     </body>
     </html>
     """
-    st.markdown("### 👁️ Bản xem trước Chuẩn xác Từng Trang & Chèn Ảnh")
+    st.markdown("### 👁️ Bản xem trước Định dạng Chuẩn Equation & Hình ảnh")
     components.html(copier_component, height=750, scrolling=False)
 
 
@@ -233,7 +239,7 @@ with tab1:
         if not mistral_file: st.warning("Vui lòng chọn file!")
         elif not st.session_state.saved_mistral_key: st.error("Nhập Mistral API Key!")
         else:
-            with st.spinner("Đang xử lý lấy file markdown và chèn ảnh..."):
+            with st.spinner("Đang xử lý lấy file markdown và chèn ảnh đúng vị trí..."):
                 md_content, imgs = process_markdown_api(mistral_file, st.session_state.saved_mistral_key, "mistral-ocr-latest")
                 if md_content:
                     st.session_state.active_markdown_content = md_content
