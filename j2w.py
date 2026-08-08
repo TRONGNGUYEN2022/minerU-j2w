@@ -430,7 +430,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Khung HTML Preview Hoàn Hảo)
+# TAB 2: MISTRAL OCR (API + Pandoc + Khung HTML Fix Chuẩn Toán)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -508,7 +508,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML hoàn chỉnh tích hợp nút Sao chép & Tải Word
+    # Hiển thị Khung Preview HTML tối ưu công thức toán và tích hợp nút tải Pandoc
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
@@ -542,6 +542,8 @@ with tab2:
             return match.group(0)
 
         processed_html = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart_html, raw_md)
+        processed_html = processed_html.replace(r"\\\[", "$$").replace(r"\\\]", "$$")
+        processed_html = processed_html.replace(r"\\[", "$$").replace(r"\\]", "$$")
         processed_html = processed_html.replace(r"\(", "$").replace(r"\)", "$")
         processed_html = processed_html.replace(r"\[", "$$").replace(r"\]", "$$")
         
@@ -564,7 +566,7 @@ with tab2:
             <meta charset="utf-8">
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}, {{left: '$$', right: '$$', display: true}}]}});"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$$', right: '$$', display: true}}, {{left: '$', right: '$', display: false}}, {{left: '\\\\(', right: '\\\\)', display: false}}, {{left: '\\\\[', right: '\\\\]', display: true}}]}});"></script>
             <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
             <style>
                 body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; color: #2d3748; }}
