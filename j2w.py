@@ -23,7 +23,12 @@ st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", lay
 MINERU_BASE_URL = "https://mineru.net"
 DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 
-# --- KHỞI TẠO SESSION STATE & LƯU KEY ---
+# Tạo thư mục mặc định để lưu file tải về từ MinerU Web Extractor
+DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
+os.makedirs(DEFAULT_DOWNLOAD_DIR, exist_ok=True)
+os.makedirs(os.path.join(DEFAULT_DOWNLOAD_DIR, "images"), exist_ok=True)
+
+# --- KHỞI TẠO SESSION STATE ---
 if "api_key_editable" not in st.session_state:
     st.session_state.api_key_editable = False
 if "gemini_key_editable" not in st.session_state:
@@ -32,12 +37,10 @@ if "active_json" not in st.session_state:
     st.session_state.active_json = None
 if "active_images_dict" not in st.session_state:
     st.session_state.active_images_dict = {}
-if "extracted_images_dir" not in st.session_state:
-    st.session_state.extracted_images_dir = ""
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "MinerU_Document"
 
-# Cơ chế lưu trữ Gemini API Key vĩnh viễn trong session/browser state
+# Khởi tạo lưu trữ Gemini API Key tự động trong session
 if "saved_gemini_key" not in st.session_state:
     st.session_state.saved_gemini_key = ""
 
@@ -384,7 +387,11 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
 
 st.title("📐 Convert PDF/Image to word")
 
-tab1, tab2 = st.tabs(["🚀 Gửi lên MinerU Server (API)", "📁 Tải file layout.json & Ảnh có sẵn (Offline)"])
+tab1, tab2, tab3 = st.tabs([
+    "🚀 Gửi lên MinerU Server (API)", 
+    "🌐 MinerU Web Extractor", 
+    "📁 Tải file layout.json & Ảnh có sẵn (Offline)"
+])
 
 with tab1:
     st.subheader("Cấu hình API Keys & Model")
@@ -397,7 +404,6 @@ with tab1:
             st.rerun()
             
     with col_k2:
-        # Nhập Gemini API Key và lưu tự động bằng hàm callback on_change
         def update_gemini_key():
             st.session_state.saved_gemini_key = st.session_state.gemini_input_field
 
@@ -408,14 +414,13 @@ with tab1:
             key="gemini_input_field",
             on_change=update_gemini_key
         )
-        # Đồng bộ trực tiếp ngay khi gõ
         if gemini_token_input:
             st.session_state.saved_gemini_key = gemini_token_input
 
-    # Lựa chọn model Gemini
+    # Lựa chọn model Gemini (Đã bổ sung các model 3.6, 3.5, 2.5)
     selected_gemini_model = st.selectbox(
         "Chọn Model Gemini dự phòng:",
-        ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
+        ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
         index=0
     )
 
@@ -460,7 +465,7 @@ with tab1:
                             break
                         progress_bar.progress(min((i + 1) * 2, 100))
 
-            # Nếu MinerU lỗi -> Gọi Gemini API với model đã chọn và key đã lưu
+            # Nếu MinerU lỗi -> Gọi Gemini API với model đã chọn
             if not success_processed:
                 active_key = st.session_state.saved_gemini_key.strip() or gemini_token_input.strip()
                 if active_key:
@@ -476,8 +481,48 @@ with tab1:
                     st.error("MinerU thất bại và bạn chưa nhập Gemini API Key để dùng làm phương án dự phòng!")
 
 with tab2:
-    json_f = st.file_uploader("Chọn file layout.json", type=["json"])
-    image_files = st.file_uploader("Chọn các file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
+    st.subheader("🌐 Truy cập nhanh MinerU Web Extractor")
+    st.markdown("Bạn có thể truy cập trực tiếp trang web xử lý ưu tiên của MinerU tại đây để upload file không bị giới hạn lỗi API:")
+    st.markdown("[🔗 Mở trang MinerU Web Extractor](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
+    
+    st.divider()
+    st.subheader("📂 Tự động đồng bộ file kết quả từ MinerU Web")
+    st.markdown(f"Hệ thống đã chuẩn bị thư mục mặc định: `{DEFAULT_DOWNLOAD_DIR}/` và thư mục `images/` bên trong.")
+    st.markdown("Sau khi bạn tải file ZIP kết quả từ trang web MinerU về, hãy giải nén và tải file `layout.json` cùng thư mục `images` lên ô bên dưới để ứng dụng tự động xử lý:")
+
+    web_json_f = st.file_uploader("Tải file layout.json từ gói giải nén MinerU Web", type=["json"], key="web_json")
+    web_image_files = st.file_uploader("Tải toàn bộ file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="web_imgs")
+    
+    if web_json_f:
+        try:
+            # Lưu tự động vào thư mục mặc định
+            json_bytes = web_json_f.getvalue()
+            json_path = os.path.join(DEFAULT_DOWNLOAD_DIR, web_json_f.name)
+            with open(json_path, "wb") as f:
+                f.write(json_bytes)
+
+            st.session_state.active_json = json.loads(json_bytes.decode("utf-8"))
+            st.session_state.active_file_name = web_json_f.name.rsplit(".", 1)[0]
+            
+            if web_image_files:
+                images_dict = {}
+                img_dir_path = os.path.join(DEFAULT_DOWNLOAD_DIR, "images")
+                os.makedirs(img_dir_path, exist_ok=True)
+                for img in web_image_files:
+                    img_bytes = img.getvalue()
+                    images_dict[img.name] = img_bytes
+                    with open(os.path.join(img_dir_path, img.name), "wb") as img_f:
+                        img_f.write(img_bytes)
+                st.session_state.active_images_dict = images_dict
+                
+            st.success(f"Đã lưu và nạp dữ liệu thành công vào thư mục mặc định `{DEFAULT_DOWNLOAD_DIR}/`!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Lỗi khi xử lý file: {e}")
+
+with tab3:
+    json_f = st.file_uploader("Chọn file layout.json", type=["json"], key="offline_json")
+    image_files = st.file_uploader("Chọn các file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="offline_imgs")
     if json_f:
         try:
             st.session_state.active_json = json.loads(json_f.getvalue().decode("utf-8"))
