@@ -1,6 +1,5 @@
 import os
 import re
-import zipfile
 import base64
 import pypandoc
 import streamlit as st
@@ -14,6 +13,16 @@ except ImportError:
 st.set_page_config(page_title="Convert PDF to Word with Pandoc", page_icon="📐", layout="wide")
 
 st.title("📐 Convert PDF to Word (Mistral OCR + Pandoc)")
+
+# Khởi tạo các giá trị trong Session State để tránh lỗi AttributeError
+if "preview_markdown" not in st.session_state:
+    st.session_state.preview_markdown = ""
+if "images_dict" not in st.session_state:
+    st.session_state.images_dict = {}
+if "docx_bytes" not in st.session_state:
+    st.session_state.docx_bytes = None
+if "file_name" not in st.session_state:
+    st.session_state.file_name = "Document"
 
 # Cấu hình API Key
 mistral_api_key = st.text_input("Nhập Mistral API Key:", type="password")
@@ -63,7 +72,6 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
                                         img_bytes = base64.b64decode(img_b64)
                                         img_filename = f"{img_id}.jpeg"
                                         images_dict[img_filename] = img_bytes
-                                        # Lưu ảnh ra thư mục gốc cho Pandoc biên dịch Word
                                         with open(os.path.join(root_dir, img_filename), "wb") as img_f:
                                             img_f.write(img_bytes)
                                     except: pass
@@ -81,17 +89,16 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
                     extra_args=['--standalone']
                 )
                 
-                # Đọc byte file Word để cho người dùng tải xuống
+                # Đọc byte file Word
                 with open(output_docx, "rb") as f:
                     docx_bytes = f.read()
 
-                # Lưu vào Session State
+                # Lưu vào Session State an toàn
                 st.session_state.preview_markdown = full_markdown
                 st.session_state.images_dict = images_dict
                 st.session_state.docx_bytes = docx_bytes
                 st.session_state.file_name = uploaded_pdf.name.rsplit('.', 1)[0]
                 
-                # Dọn dẹp file tạm
                 if os.path.exists(temp_md_path):
                     os.remove(temp_md_path)
                     
@@ -103,41 +110,37 @@ if uploaded_pdf and st.button("🚀 Gửi PDF lên Mistral OCR"):
 # ==========================================
 # 👁️ KHUNG PREVIEW VÀ NÚT TẢI XUỐNG
 # ==========================================
-if "preview_markdown" in st.session_state and st.session_state.preview_markdown:
+if st.session_state.preview_markdown:
     st.divider()
     
     col1, col2 = st.columns([2, 1])
     with col1:
         st.subheader("👁️ Bản xem trước Nội dung & Hình ảnh")
     with col2:
-        # Nút tải xuống file Word đã được Pandoc biên dịch hoàn hảo
-        st.download_button(
-            label="📥 Tải xuống file Word (.docx)",
-            data=st.session_state.docx_bytes,
-            file_name=f"{st.session_state.file_name}_Converted.docx",
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True
-        )
+        if st.session_state.docx_bytes:
+            st.download_button(
+                label="📥 Tải xuống file Word (.docx)",
+                data=st.session_state.docx_bytes,
+                file_name=f"{st.session_state.file_name}_Converted.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
+            )
 
-    # 1. Thay thế cú pháp hình ảnh thành Base64 để hiển thị trực tiếp trên Streamlit
+    # Xử lý hiển thị base64 ảnh cho preview
     preview_md = st.session_state.preview_markdown
     
     def replace_img_base64(match):
         alt_text = match.group(1)
         img_filename = os.path.basename(match.group(2))
         if img_filename in st.session_state.images_dict:
-            # Nhúng trực tiếp Data URI Base64 vào Markdown
             b64_data = base64.b64encode(st.session_state.images_dict[img_filename]).decode('utf-8')
             return f"![{alt_text}](data:image/jpeg;base64,{b64_data})"
         return match.group(0)
 
     preview_md = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_base64, preview_md)
     
-    # 2. Chuẩn hóa cú pháp toán học (đảm bảo Streamlit nhận diện được KaTeX)
-    # Streamlit hỗ trợ tốt nhất dấu $ và $$
     preview_md = preview_md.replace(r"\(", "$").replace(r"\)", "$")
     preview_md = preview_md.replace(r"\[", "$$").replace(r"\]", "$$")
 
-    # 3. Hiển thị bằng Component mặc định của Streamlit (Hỗ trợ sẵn Table, KaTeX, Markdown)
     with st.container(border=True):
         st.markdown(preview_md, unsafe_allow_html=True)
