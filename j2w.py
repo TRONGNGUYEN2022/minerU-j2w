@@ -24,8 +24,8 @@ UNIFIED_IMAGE_DIR = "images"
 os.makedirs(UNIFIED_IMAGE_DIR, exist_ok=True)
 
 # --- KHỞI TẠO SESSION STATE ---
-if "active_json" not in st.session_state:
-    st.session_state.active_json = None
+if "active_sequential_pages" not in st.session_state:
+    st.session_state.active_sequential_pages = []
 if "active_images_dict" not in st.session_state:
     st.session_state.active_images_dict = {}
 if "active_file_name" not in st.session_state:
@@ -33,10 +33,10 @@ if "active_file_name" not in st.session_state:
 if "saved_mistral_key" not in st.session_state:
     st.session_state.saved_mistral_key = ""
 
-# --- HÀM ĐỌC VÀ GỘP JSON CHUẨN TỪ MISTRAL ZIP ---
-def unify_mistral_zip(zip_bytes):
+# --- HÀM XỬ LÝ CUỐN CHIẾU TỪNG TRANG TỪ FILE ZIP ---
+def process_sequential_mistral_zip(zip_bytes):
     images_dict = {}
-    all_pages_data = []
+    sequential_pages = []
     
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
         namelist = z.namelist()
@@ -46,41 +46,52 @@ def unify_mistral_zip(zip_bytes):
             if match:
                 page_dirs.add(match.group(1))
         
+        # Sắp xếp cuốn chiếu từ trang 1 đến trang cuối
         sorted_pages = sorted(list(page_dirs), key=lambda x: int(x.split("-")[1]))
         
         for p_dir in sorted_pages:
-            page_blocks = []
+            page_data = {
+                "page_name": p_dir,
+                "blocks": [],
+                "markdown": "",
+                "images": {}
+            }
+            
+            # 1. Đọc metadata blocks nếu có
             meta_path = f"pages/{p_dir}/page-metadata.json"
             if meta_path in namelist:
                 try:
                     meta_content = json.loads(z.read(meta_path).decode("utf-8"))
-                    page_blocks = meta_content.get("blocks", [])
+                    page_data["blocks"] = meta_content.get("blocks", [])
                 except: pass
                 
-            page_images = {}
+            # 2. Đọc file markdown của trang làm nội dung dự phòng/bổ sung
+            md_path = f"pages/{p_dir}/markdown.md"
+            if md_path in namelist:
+                try:
+                    page_data["markdown"] = z.read(md_path).decode("utf-8")
+                except: pass
+                
+            # 3. Trích xuất toàn bộ ảnh của riêng trang này và lưu vào thư mục images
             for f in namelist:
                 if f.startswith(f"pages/{p_dir}/") and (f.endswith(".jpeg") or f.endswith(".png") or f.endswith(".jpg")):
                     img_name = os.path.basename(f)
                     img_bytes = z.read(f)
-                    page_images[img_name] = img_bytes
+                    page_data["images"][img_name] = img_bytes
                     images_dict[img_name] = img_bytes
                     
                     with open(os.path.join(UNIFIED_IMAGE_DIR, img_name), "wb") as img_f:
                         img_f.write(img_bytes)
                         
-            all_pages_data.append({
-                "page_name": p_dir,
-                "blocks": page_blocks,
-                "images": page_images
-            })
+            sequential_pages.append(page_data)
             
-    return {"pages": all_pages_data}, images_dict
+    return sequential_pages, images_dict
 
-# --- GỌI API MISTRAL OCR VÀ TẠO CẤU TRÚC TRANG ---
-def process_with_mistral_unified(uploaded_file, mistral_api_key, selected_model):
+# --- GỌI API MISTRAL OCR VÀ XỬ LÝ CUỐN CHIẾU ---
+def process_sequential_mistral_api(uploaded_file, mistral_api_key, selected_model):
     if not MISTRAL_AVAILABLE:
         st.error("Chưa cài đặt thư viện `mistralai`.")
-        return None, {}
+        return [], {}
     try:
         client = Mistral(api_key=mistral_api_key)
         file_bytes = uploaded_file.getvalue()
@@ -93,18 +104,19 @@ def process_with_mistral_unified(uploaded_file, mistral_api_key, selected_model)
             include_blocks=True
         )
         
-        all_pages_data = []
+        sequential_pages = []
         images_dict = {}
         
         if hasattr(ocr_response, "pages"):
             for idx, page in enumerate(ocr_response.pages):
                 p_dir = f"page-{idx+1}"
-                page_blocks = []
-                page_images = {}
+                page_data = {
+                    "page_name": p_dir,
+                    "blocks": [],
+                    "markdown": page.markdown if hasattr(page, "markdown") else "",
+                    "images": {}
+                }
                 
-                if hasattr(page, "markdown") and page.markdown:
-                    page_blocks.append({"type": "text", "content": page.markdown})
-                    
                 if hasattr(page, "images") and page.images:
                     for img in page.images:
                         if hasattr(img, "id") and hasattr(img, "image_base64") and img.image_base64:
@@ -114,31 +126,34 @@ def process_with_mistral_unified(uploaded_file, mistral_api_key, selected_model)
                             try:
                                 img_bytes = base64.b64decode(img_b64)
                                 img_filename = f"{img_id}.jpeg"
-                                page_images[img_filename] = img_bytes
+                                page_data["images"][img_filename] = img_bytes
                                 images_dict[img_filename] = img_bytes
                                 
                                 with open(os.path.join(UNIFIED_IMAGE_DIR, img_filename), "wb") as img_f:
                                     img_f.write(img_bytes)
                                     
-                                page_blocks.append({
+                                page_data["blocks"].append({
                                     "type": "image",
                                     "imageId": img_filename,
                                     "content": f"![{img_filename}]({img_filename})"
                                 })
                             except: pass
                             
-                all_pages_data.append({
-                    "page_name": p_dir,
-                    "blocks": page_blocks,
-                    "images": page_images
-                })
-                            
-        return {"pages": all_pages_data}, images_dict
+                # Thêm block text từ markdown
+                if page_data["markdown"]:
+                    page_data["blocks"].append({
+                        "type": "text",
+                        "content": page_data["markdown"]
+                    })
+                    
+                sequential_pages.append(page_data)
+                
+        return sequential_pages, images_dict
     except Exception as e:
         st.error(f"Lỗi Mistral OCR: {e}")
-        return None, {}
+        return [], {}
 
-def get_unified_image_bytes(img_name, images_dict):
+def get_image_bytes_helper(img_name, images_dict):
     if not img_name: return None
     clean_name = os.path.basename(img_name)
     if images_dict and clean_name in images_dict:
@@ -149,38 +164,54 @@ def get_unified_image_bytes(img_name, images_dict):
             return f.read()
     return None
 
-# --- RENDER PREVIEW CHÍNH XÁC THEO TỪNG BLOCK VÀ XỬ LÝ EQUATION ---
-def render_unified_json_preview(json_data, images_dict, file_name="document"):
+# --- RENDER PREVIEW CUỐN CHIẾU TỪNG TRANG CHUẨN XÁC ---
+def render_sequential_preview(sequential_pages, images_dict, file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
     
-    pages = json_data.get("pages", [])
-    for page in pages:
+    for page in sequential_pages:
         p_name = page.get("page_name", "page-1")
         blocks = page.get("blocks", [])
         page_images = page.get("images", {})
         all_imgs = {**images_dict, **page_images}
         
-        preview_inner_html += f"<hr/><h3 style='color: #2b6cb0; margin-top: 20px;'>Trang {p_name.split('-')[1]}</h3>"
+        page_num = p_name.split('-')[1]
+        preview_inner_html += f"<hr/><h3 style='color: #2b6cb0; margin-top: 25px;'>Trang {page_num}</h3>"
         
-        for block in blocks:
-            b_type = block.get("type")
-            content = block.get("content", "")
-            
-            if b_type == "image":
-                img_id = block.get("imageId")
-                if not img_id:
-                    m = re.search(r'\((.*?)\)', content)
-                    if m: img_id = os.path.basename(m.group(1))
+        if blocks:
+            # Xử lý theo danh sách blocks tuần tự của trang
+            for block in blocks:
+                b_type = block.get("type")
+                content = block.get("content", "")
                 
-                img_bytes = get_unified_image_bytes(img_id, all_imgs)
-                if img_bytes:
-                    encoded = base64.b64encode(img_bytes).decode("utf-8")
-                    preview_inner_html += f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{encoded}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>'
-            elif b_type in ["header", "footer"]:
-                preview_inner_html += f"<div style='font-size: 13px; color: #a0aec0; margin: 5px 0;'>{content}</div>"
-            else:
-                formatted_content = content.replace("\n", "<br>")
-                preview_inner_html += f"<div style='margin-bottom: 10px;'>{formatted_content}</div>"
+                if b_type == "image":
+                    img_id = block.get("imageId")
+                    if not img_id:
+                        m = re.search(r'\((.*?)\)', content)
+                        if m: img_id = os.path.basename(m.group(1))
+                    
+                    img_bytes = get_image_bytes_helper(img_id, all_imgs)
+                    if img_bytes:
+                        encoded = base64.b64encode(img_bytes).decode("utf-8")
+                        preview_inner_html += f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{encoded}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>'
+                elif b_type in ["header", "footer"]:
+                    preview_inner_html += f"<div style='font-size: 13px; color: #a0aec0; margin: 5px 0;'>{content}</div>"
+                else:
+                    # Kiểm tra và thay thế ảnh trong text nếu có
+                    for img_name, ibytes in all_imgs.items():
+                        if img_name in content:
+                            enc = base64.b64encode(ibytes).decode("utf-8")
+                            content = content.replace(f"![{img_name}]({img_name})", f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{enc}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" /></div>')
+                    
+                    formatted_content = content.replace("\n", "<br>")
+                    preview_inner_html += f"<div style='margin-bottom: 10px;'>{formatted_content}</div>"
+        else:
+            # Fallback dùng file markdown nếu không có blocks metadata
+            md_content = page.get("markdown", "")
+            for img_name, ibytes in all_imgs.items():
+                if img_name in md_content:
+                    enc = base64.b64encode(ibytes).decode("utf-8")
+                    md_content = md_content.replace(f"({img_name})", f"(data:image/jpeg;base64,{enc})")
+            preview_inner_html += f"<div style='margin-bottom: 10px;'>{md_content.replace(chr(10), '<br>')}</div>"
                 
     preview_inner_html += '</div>'
     
@@ -230,7 +261,7 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
             const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
             const link = document.createElement('a');
             link.href = URL.createObjectURL(converted);
-            link.download = "{file_name}_Accurate.docx";
+            link.download = "{file_name}_Sequential.docx";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -246,7 +277,7 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
     </body>
     </html>
     """
-    st.markdown("### 👁️ Bản xem trước Định vị Ảnh & Công thức Chuẩn xác")
+    st.markdown("### 👁️ Bản xem trước Xử lý Cuốn chiếu Từng trang")
     components.html(copier_component, height=750, scrolling=False)
 
 
@@ -255,7 +286,7 @@ def render_unified_json_preview(json_data, images_dict, file_name="document"):
 st.title("📐 Convert PDF/Image to word")
 
 tab1, tab2 = st.tabs([
-    "🌪️ Mistral OCR (Accurate Parser)", 
+    "🌪️ Mistral OCR (Sequential)", 
     "📁 Tải file ZIP kết quả Offline"
 ])
 
@@ -266,17 +297,17 @@ with tab1:
     
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="t2")
     
-    if st.button("📤 Gửi & Xử lý Định vị Chuẩn", key="b2"):
+    if st.button("📤 Gửi & Xử lý Cuốn chiếu", key="b2"):
         if not mistral_file: st.warning("Vui lòng chọn file!")
         elif not st.session_state.saved_mistral_key: st.error("Nhập Mistral API Key!")
         else:
-            with st.spinner("Đang xử lý phân tích khối block và định vị ảnh..."):
-                u_json, u_imgs = process_with_mistral_unified(mistral_file, st.session_state.saved_mistral_key, "mistral-ocr-latest")
-                if u_json:
-                    st.session_state.active_json = u_json
-                    st.session_state.active_images_dict = u_imgs
+            with st.spinner("Đang xử lý cuốn chiếu từ trang 1 đến trang cuối..."):
+                seq_pages, imgs = process_sequential_mistral_api(mistral_file, st.session_state.saved_mistral_key, "mistral-ocr-latest")
+                if seq_pages:
+                    st.session_state.active_sequential_pages = seq_pages
+                    st.session_state.active_images_dict = imgs
                     st.session_state.active_file_name = mistral_file.name.rsplit(".", 1)[0]
-                    st.success("Hoàn tất xử lý định vị chuẩn xác thành công!")
+                    st.success("Hoàn tất xử lý cuốn chiếu thành công!")
                     st.rerun()
 
 with tab2:
@@ -284,18 +315,18 @@ with tab2:
     uploaded_zip = st.file_uploader("Chọn file ZIP kết quả Mistral", type=["zip"], key="offline_zip")
     
     if uploaded_zip:
-        u_json, u_imgs = unify_mistral_zip(uploaded_zip.getvalue())
-        if u_json:
-            st.session_state.active_json = u_json
-            st.session_state.active_images_dict = u_imgs
+        seq_pages, imgs = process_sequential_mistral_zip(uploaded_zip.getvalue())
+        if seq_pages:
+            st.session_state.active_sequential_pages = seq_pages
+            st.session_state.active_images_dict = imgs
             st.session_state.active_file_name = uploaded_zip.name.rsplit(".", 1)[0]
-            st.success("Đã nạp file ZIP, giải mã block định vị và gom ảnh thành công!")
+            st.success("Đã nạp và xử lý cuốn chiếu từ file ZIP thành công!")
             st.rerun()
 
-if st.session_state.active_json is not None:
+if st.session_state.active_sequential_pages:
     st.divider()
-    render_unified_json_preview(
-        st.session_state.active_json,
+    render_sequential_preview(
+        st.session_state.active_sequential_pages,
         st.session_state.active_images_dict,
         file_name=st.session_state.active_file_name
     )
