@@ -430,7 +430,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Khung HTML Fix Chuẩn Toán)
+# TAB 2: MISTRAL OCR (API + Pandoc + Khung HTML Fix Triệt Để Toán Học)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -508,7 +508,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML tối ưu công thức toán và tích hợp nút tải Pandoc
+    # Hiển thị Khung Preview HTML tối ưu render KaTeX
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
@@ -542,22 +542,7 @@ with tab2:
             return match.group(0)
 
         processed_html = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart_html, raw_md)
-        processed_html = processed_html.replace(r"\\\[", "$$").replace(r"\\\]", "$$")
-        processed_html = processed_html.replace(r"\\[", "$$").replace(r"\\]", "$$")
-        processed_html = processed_html.replace(r"\(", "$").replace(r"\)", "$")
-        processed_html = processed_html.replace(r"\[", "$$").replace(r"\]", "$$")
-        
-        html_lines = processed_html.split("\n")
-        formatted_body_html = ""
-        for line in html_lines:
-            if line.strip().startswith("###"):
-                formatted_body_html += f"<h3 style='color: #2b6cb0; margin-top: 20px;'>{line.replace('###', '').strip()}</h3>"
-            elif line.strip().startswith("##"):
-                formatted_body_html += f"<h2 style='color: #2c5282; margin-top: 25px;'>{line.replace('##', '').strip()}</h2>"
-            elif line.strip().startswith("<hr/>"):
-                formatted_body_html += "<hr style='border: 0; border-top: 1px solid #cbd5e0; margin: 20px 0;'/>"
-            elif line.strip():
-                formatted_body_html += f"<p style='margin-bottom: 10px;'>{line}</p>"
+        escaped_markdown_json = json.dumps(processed_html)
 
         mistral_component_html = f"""
         <!DOCTYPE html>
@@ -566,7 +551,8 @@ with tab2:
             <meta charset="utf-8">
             <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$$', right: '$$', display: true}}, {{left: '$', right: '$', display: false}}, {{left: '\\\\(', right: '\\\\)', display: false}}, {{left: '\\\\[', right: '\\\\]', display: true}}]}});"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
             <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
             <style>
                 body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; color: #2d3748; }}
@@ -588,10 +574,29 @@ with tab2:
                 <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu thành file Word (.docx) từ Preview</button>
                 <span id="status-msg">✔ Thao tác thành công!</span>
             </div>
-            <div class="preview-card" id="content-to-copy">
-                {formatted_body_html}
-            </div>
+            <div class="preview-card" id="content-to-copy"></div>
+
             <script>
+            const rawMarkdown = {escaped_markdown_json};
+            document.getElementById('content-to-copy').innerHTML = marked.parse(rawMarkdown);
+
+            function renderMath() {{
+                if (typeof renderMathInElement === 'function') {{
+                    renderMathInElement(document.getElementById('content-to-copy'), {{
+                        delimiters: [
+                            {{left: '$$', right: '$$', display: true}},
+                            {{left: '$', right: '$', display: false}},
+                            {{left: '\\\\[', right: '\\\\]', display: true}},
+                            {{left: '\\\\(', right: '\\\\)', display: false}}
+                        ],
+                        throwOnError: false
+                    }});
+                }}
+            }}
+
+            document.addEventListener("DOMContentLoaded", renderMath);
+            setTimeout(renderMath, 300);
+
             function copyContentToClipboard() {{
                 const range = document.createRange();
                 range.selectNode(document.getElementById('content-to-copy'));
@@ -603,6 +608,7 @@ with tab2:
                 }} catch (err) {{ alert('Không thể sao chép tự động!'); }}
                 window.getSelection().removeAllRanges();
             }}
+
             function saveAsWordDocx() {{
                 const contentHTML = document.getElementById('content-to-copy').innerHTML;
                 const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
@@ -614,6 +620,7 @@ with tab2:
                 document.body.removeChild(link);
                 showStatus("Đã tải xuống file Word thành công!");
             }}
+
             function showStatus(msg) {{
                 const status = document.getElementById('status-msg');
                 status.innerText = "✔ " + msg;
