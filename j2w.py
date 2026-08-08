@@ -163,9 +163,15 @@ def check_task_status_v4(api_token, task_id):
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
-            return response.json().get("data", {})
-    except: pass
-    return None
+            res_json = response.json()
+            data = res_json.get("data", {})
+            # Bắt toàn bộ chi tiết lỗi thô từ server nếu task thất bại
+            if data.get("state") == "failed":
+                print(f"DEBUG MINERU ERROR RAW: {res_json}")
+            return data
+    except Exception as e:
+        print(f"Lỗi kiểm tra task: {e}")
+    return {}
 
 
 # --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
@@ -460,7 +466,9 @@ with tab1:
                                     st.rerun()
                             break
                         elif state == "failed":
-                            st.warning(f"MinerU báo lỗi: {task_data.get('err_msg')}. Đang chuyển sang dự phòng bằng Gemini...")
+                            # Bóc tách tường minh chi tiết lỗi từ server
+                            err_msg = task_data.get('err_msg') or task_data.get('error') or task_data.get('message') or "Không có mô tả chi tiết từ server"
+                            st.warning(f"MinerU báo lỗi chi tiết: {err_msg}. Đang chuyển sang dự phòng bằng Gemini...")
                             break
                         progress_bar.progress(min((i + 1) * 2, 100))
 
@@ -483,7 +491,7 @@ with tab2:
     st.markdown("Trang web chính thức được nhúng bên dưới. Bạn có thể thao tác trực tiếp hoặc bấm vào nút mở tab mới nếu trình duyệt chặn khung nhúng.")
     st.markdown("[🔗 Mở trang MinerU Web Extractor trong tab mới](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
     
-    # Nhúng trực tiếp trang web vào Streamlit
+    # Nhúng trực tiếp trang web
     components.iframe("https://mineru.net/OpenSourceTools/Extractor", height=650, scrolling=True)
     
     st.divider()
