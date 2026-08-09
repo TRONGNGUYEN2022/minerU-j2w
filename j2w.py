@@ -1,3 +1,13 @@
+Chào bạn, lỗi Word không chèn được ảnh chủ yếu nằm ở việc đường dẫn ảnh trong file Markdown không khớp với tên file ảnh thực tế khi Pandoc biên dịch, đồng thời việc đổi thư mục gốc `os.chdir()` trong Streamlit có thể gây mất định hướng đường dẫn. 
+
+Mình đã fix lại toàn bộ Tab 2 theo các tiêu chí:
+1. **Chuẩn hóa tên file ảnh**: Đảm bảo tên ảnh lưu xuống đĩa và tên ảnh trong file `.md` trùng khớp 100%.
+2. **Sử dụng `--resource-path` của Pandoc**: Bỏ hẳn `os.chdir()`, thay vào đó dùng lệnh của Pandoc để chỉ định thư mục chứa ảnh, giúp Pandoc tìm thấy ảnh để nhúng vào Word một cách an toàn.
+3. **Xử lý hậu kỳ**: Cắt bỏ các tham số URL dư thừa (như `?x-oss-process...`) để tên file hoàn toàn sạch.
+
+Dưới đây là mã nguồn đã được sửa lỗi, bạn copy toàn bộ nội dung này thay thế cho file `j2w.py` cũ nhé:
+
+```python
 import base64
 import io
 import json
@@ -529,10 +539,23 @@ with tab2:
                     full_markdown = ""
                     images_dict = {}
                     
+                    # Hàm phụ để xử lý chuẩn hóa đường dẫn ảnh từ Markdown
+                    def normalize_md_images(match):
+                        alt = match.group(1)
+                        path = match.group(2)
+                        if path.startswith("data:"):
+                            return match.group(0)
+                        # Bỏ query parameters (nếu có) ví dụ path?x-oss-process...
+                        path = path.split('?')[0]
+                        filename = os.path.basename(path)
+                        return f"![{alt}]({filename})"
+                    
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
-                            page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
+                            
+                            # Áp dụng hàm làm sạch đường dẫn ảnh vào Markdown
+                            page_md = re.sub(r'!\[(.*?)\]\((.*?)\)', normalize_md_images, page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                             
@@ -543,42 +566,44 @@ with tab2:
                                         img_b64 = img.image_base64
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
-                                            clean_id = img_id.replace("_", "-")
+                                            # Đảm bảo tên ảnh có đuôi mở rộng
+                                            if not img_id.lower().endswith(('.jpg', '.jpeg', '.png')):
+                                                img_id = f"{img_id}.jpg"
+                                                
                                             img_data_decoded = base64.b64decode(img_b64)
-                                            images_dict[f"{clean_id}.jpeg"] = img_data_decoded
-                                            images_dict[f"{img_id}.jpeg"] = img_data_decoded
+                                            images_dict[img_id] = img_data_decoded
                                         except: 
                                             pass
 
                     # --- LƯU VÀO SESSION STATE ĐỂ HIỂN THỊ CỐ ĐỊNH ---
                     st.session_state.debug_images_keys = list(images_dict.keys())
 
-                    # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY ---
+                    # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY (CẢI TIẾN AN TOÀN) ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
-                        temp_md_path = os.path.join(tmp_dir, "temp_input.md")
-                        with open(temp_md_path, "w", encoding="utf-8") as f:
-                            f.write(full_markdown)
-                        
+                        # 1. Lưu tất cả ảnh vào thư mục tạm
                         for img_name, img_bytes in images_dict.items():
                             with open(os.path.join(tmp_dir, img_name), "wb") as img_f:
                                 img_f.write(img_bytes)
                                 
-                        original_dir = os.getcwd()
-                        os.chdir(tmp_dir)
+                        # 2. Ghi file Markdown vào thư mục tạm
+                        temp_md_path = os.path.join(tmp_dir, "temp_input.md")
+                        with open(temp_md_path, "w", encoding="utf-8") as f:
+                            f.write(full_markdown)
                         
+                        # 3. Dùng Pandoc convert và chỉ định resource-path để Pandoc tự tìm ảnh
+                        output_docx = os.path.join(tmp_dir, "Mistral_Output.docx")
                         try:
-                            output_docx = "Mistral_Output.docx"
                             pypandoc.convert_file(
-                                "temp_input.md", 
+                                temp_md_path, 
                                 'docx', 
-                                outputfile=output_docx, 
-                                extra_args=['--extract-media=.']
+                                outputfile=output_docx,
+                                extra_args=['--resource-path', tmp_dir]
                             )
                             with open(output_docx, "rb") as f:
                                 docx_bytes = f.read()
                             st.session_state.mistral_docx_bytes = docx_bytes
-                        finally:
-                            os.chdir(original_dir)
+                        except Exception as pandoc_err:
+                            st.error(f"Lỗi Pandoc convert: {pandoc_err}")
 
                     st.session_state.mistral_preview_markdown = full_markdown
                     st.session_state.active_images_dict = images_dict
@@ -769,3 +794,4 @@ if st.session_state.active_json is not None:
         st.session_state.active_images_dict,
         file_name=st.session_state.active_file_name
     )
+```
