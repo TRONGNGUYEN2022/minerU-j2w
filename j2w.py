@@ -473,7 +473,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Tải file về máy)
+# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh & Debug View)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -494,20 +494,7 @@ with tab2:
 
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="mistral_upload")
     
-    # Nút bấm Gửi phân tích
-    submitted = st.button("🚀 Gửi PDF lên Mistral OCR & Phân tích")
-
-    # Nút tải file gốc ngay dưới nút gửi
-    if mistral_file is not None:
-        st.download_button(
-            label="📥 Tải file gốc vừa upload về máy của bạn",
-            data=mistral_file.getvalue(),
-            file_name=mistral_file.name,
-            mime=mistral_file.type,
-            key="download_original_mistral_file"
-        )
-    
-    if submitted:
+    if st.button("🚀 Gửi PDF lên Mistral OCR & Phân tích"):
         active_m_key = st.session_state.saved_mistral_key.strip()
         if not mistral_file:
             st.warning("Vui lòng chọn file!")
@@ -554,8 +541,10 @@ with tab2:
                                         except: 
                                             pass
 
+                    # --- LƯU VÀO SESSION STATE ĐỂ HIỂN THỊ CỐ ĐỊNH ---
                     st.session_state.debug_images_keys = list(images_dict.keys())
 
+                    # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         temp_md_path = os.path.join(tmp_dir, "temp_input.md")
                         with open(temp_md_path, "w", encoding="utf-8") as f:
@@ -586,7 +575,7 @@ with tab2:
                     st.session_state.active_images_dict = images_dict
                     st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
                     
-                    st.success(f"🎉 Xử lý thành công file {mistral_file.name}, đã gom ảnh sạch sẽ và tạo file Word chuẩn Pandoc!")
+                    st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
