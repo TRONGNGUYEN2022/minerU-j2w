@@ -95,13 +95,15 @@ if "mistral_preview_markdown" not in st.session_state:
     st.session_state.mistral_preview_markdown = ""
 if "mistral_docx_bytes" not in st.session_state:
     st.session_state.mistral_docx_bytes = None
+if "mistral_raw_zip_bytes" not in st.session_state:
+    st.session_state.mistral_raw_zip_bytes = None
 
 
 # --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
 def cleanup_old_temp_files():
     root_dir = "."
     for f_name in os.listdir(root_dir):
-        if f_name.lower().endswith((".jpeg", ".jpg", ".png", ".docx")) or f_name == "temp_input.md":
+        if f_name.lower().endswith((".jpeg", ".jpg", ".png", ".docx", ".zip")) or f_name == "temp_input.md":
             try:
                 os.remove(os.path.join(root_dir, f_name))
             except:
@@ -473,7 +475,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh & Debug View)
+# TAB 2: MISTRAL OCR (API + Tải Markdown/Ảnh thô + Pandoc Word)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -499,12 +501,12 @@ with tab2:
         if not mistral_file:
             st.warning("Vui lòng chọn file!")
         elif not active_m_key:
-            st.error("Vui lòng nhập Mistral API Key!")
+            st.error("Vui nhập Mistral API Key!")
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
             cleanup_old_temp_files()
-            with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và biên dịch file Word..."):
+            with st.spinner("Đang gửi PDF lên Mistral OCR API và bóc tách dữ liệu thô..."):
                 try:
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
@@ -541,10 +543,17 @@ with tab2:
                                         except: 
                                             pass
 
-                    # --- LƯU VÀO SESSION STATE ĐỂ HIỂN THỊ CỐ ĐỊNH ---
+                    # --- TẠO FILE ZIP CHỨA MARKDOWN VÀ ẢNH ĐỂ TẢI VỀ TRƯỚC KHI PANDOC XỬ LÝ ---
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+                        zip_file.writestr("output.md", full_markdown)
+                        for img_name, img_bytes in images_dict.items():
+                            zip_file.writestr(f"images/{img_name}", img_bytes)
+                    st.session_state.mistral_raw_zip_bytes = zip_buffer.getvalue()
+
                     st.session_state.debug_images_keys = list(images_dict.keys())
 
-                    # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY ---
+                    # --- XỬ LÝ PANDOC SAU ĐÓ ĐỂ TẠO FILE WORD ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         temp_md_path = os.path.join(tmp_dir, "temp_input.md")
                         with open(temp_md_path, "w", encoding="utf-8") as f:
@@ -575,14 +584,20 @@ with tab2:
                     st.session_state.active_images_dict = images_dict
                     st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
                     
-                    st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
+                    st.success("🎉 Xử lý Mistral OCR thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # --- HIỂN THỊ CỐ ĐỊNH DANH SẢN DEBUG TÊN FILE ẢNH ---
-    if "debug_images_keys" in st.session_state and st.session_state.debug_images_keys:
-        st.info(f"🔍 **Thông tin Debug từ Mistral OCR:** Bóc tách được {len(st.session_state.debug_images_keys)} định danh ảnh.")
-        st.write("Danh sách tên file ảnh:", st.session_state.debug_images_keys)
+    # --- HIỂN THỊ NÚT TẢI FILE ZIP THÔ (MARKDOWN + ẢNH) VỀ MÁY ---
+    if st.session_state.get("mistral_raw_zip_bytes"):
+        st.info("📦 Dữ liệu thô từ Mistral (Markdown kèm thư mục ảnh) đã sẵn sàng để tải về máy.")
+        st.download_button(
+            label="📥 Tải file ZIP thô (Markdown + Ảnh) về máy",
+            data=st.session_state.mistral_raw_zip_bytes,
+            file_name=f"{st.session_state.active_file_name}_Mistral_Raw.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
 
     # Hiển thị Khung Preview HTML & Nút Tải Word Chuẩn
     if st.session_state.mistral_preview_markdown:
