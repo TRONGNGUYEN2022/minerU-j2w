@@ -428,42 +428,57 @@ with tab1:
             st.warning("Vui lòng chọn file!")
         else:
             success_processed = False
+            task_id = None
+            
             with st.spinner("Đang tải file lên máy chủ trung gian..."):
                 file_url = upload_temp_file_robust(api_file)
                 
             if file_url:
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
                     task_id = start_mineru_task_by_url(st.session_state.saved_mineru_key, file_url)
+                
                 if task_id:
-                    st.success(f"Khởi tạo thành công! Task ID: `{task_id}`")
+                    st.success(f"Khởi tạo thành công! Task ID: `{task_id}`. Đang chờ MinerU xử lý...")
                     progress_bar = st.progress(0)
                     status_text = st.empty()
+                    
+                    # Thử kiểm tra trạng thái MinerU trong vòng 40 lần (mỗi lần 3 giây)
                     for i in range(40):
                         time.sleep(3)
                         task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
                         state = task_data.get("state")
                         status_text.text(f"Trạng thái MinerU: {state}")
+                        
                         if state == "done":
                             full_zip_url = task_data.get("full_zip_url")
-                            r_zip = requests.get(full_zip_url)
-                            if r_zip.status_code == 200:
-                                found_json, images_dict = extract_zip_and_get_data(r_zip.content)
-                                if found_json:
-                                    st.session_state.active_json = found_json
-                                    st.session_state.active_images_dict = images_dict
-                                    st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
-                                    st.success("Đã hoàn tất phân tích bằng MinerU!")
-                                    success_processed = True
-                                    st.rerun()
+                            if full_zip_url:
+                                r_zip = requests.get(full_zip_url)
+                                if r_zip.status_code == 200:
+                                    found_json, images_dict = extract_zip_and_get_data(r_zip.content)
+                                    if found_json:
+                                        st.session_state.active_json = found_json
+                                        st.session_state.active_images_dict = images_dict
+                                        st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
+                                        st.success("Đã hoàn tất phân tích bằng MinerU thành công!")
+                                        success_processed = True
+                                        st.rerun()
                             break
                         elif state == "failed":
+                            st.warning("MinerU báo lỗi xử lý thất bại đối với file này.")
                             break
+                        
                         progress_bar.progress(min((i + 1) * 2, 100))
+                else:
+                    st.warning("Không thể khởi tạo Task ID trên MinerU (Server có thể đang quá tải hoặc Token lỗi).")
+            else:
+                st.warning("Không thể tải file lên máy chủ trung gian.")
 
+            # Chỉ khi MinerU thực sự thất bại hoặc không lấy được task_id thì mới chạy dự phòng sang Gemini
             if not success_processed:
                 active_key = st.session_state.saved_gemini_key.strip()
                 if active_key:
-                    with st.spinner(f"MinerU gặp sự cố. Đang tiến hành trích xuất dự phòng bằng {selected_gemini_model}..."):
+                    st.info(f"Đang chuyển sang trích xuất dự phòng bằng {selected_gemini_model} do MinerU không phản hồi...")
+                    with st.spinner(f"Đang xử lý bằng {selected_gemini_model}..."):
                         g_json, g_imgs = fallback_process_with_gemini(api_file, active_key, selected_gemini_model)
                         if g_json:
                             st.session_state.active_json = g_json
@@ -472,8 +487,7 @@ with tab1:
                             st.success(f"Đã hoàn tất trích xuất thay thế bằng {selected_gemini_model}!")
                             st.rerun()
                 else:
-                    st.error("MinerU thất bại và chưa có Gemini API Key dự phòng!")
-
+                    st.error("MinerU không khả dụng và chưa có Gemini API Key dự phòng để thay thế!")
 
 # ==========================================
 # TAB 2: MISTRAL OCR (CHUẨN TÊN ẢNH ĐỂ PANDOC NHÚNG VÀO WORD)
