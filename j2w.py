@@ -367,7 +367,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
             const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
             const link = document.createElement('a');
             link.href = URL.createObjectURL(converted);
-            link.download = "{file_name}_Document.docx";
+            link.download = "{file_name}.docx";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -479,7 +479,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Xóa ảnh cũ & Quét thư mục page-*)
+# TAB 2: MISTRAL OCR (GIỮ NGUYÊN TÊN FILE GỐC & FIX CHÈN ẢNH)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -509,31 +509,20 @@ with tab2:
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
-            with st.spinner("Đang dọn dẹp ảnh cũ, quét thư mục page-*, gửi PDF lên Mistral OCR và tạo file Word..."):
+            original_full_name = mistral_file.name
+            base_name_only = original_full_name.rsplit('.', 1)[0]
+            
+            with st.spinner(f"Đang xử lý file '{original_full_name}', gom ảnh và tạo file Word..."):
                 try:
                     root_dir = "."
                     
-                    # 1. XÓA TẤT CẢ FILE ẢNH CŨ VÀ FILE TẠM TRONG THƯ MỤC GỐC
+                    # 1. DỌN SẠCH CÁC FILE ẢNH CŨ VÀ FILE TẠM TRONG THƯ MỤC GỐC
                     for f_name in os.listdir(root_dir):
-                        if f_name.lower().endswith((".jpeg", ".jpg", ".png")) or f_name == "temp_input.md":
+                        if f_name.lower().endswith((".jpeg", ".jpg", ".png", ".docx")) or f_name == "temp_input.md":
                             try:
                                 os.remove(os.path.join(root_dir, f_name))
                             except:
                                 pass
-
-                    # 2. QUÉT CÁC THƯ MỤC CON DẠNG page-* ĐỂ LẤY VÀ CHÉP ĐÈ ẢNH RA THƯ MỤC GỐC
-                    for item in os.listdir(root_dir):
-                        item_path = os.path.join(root_dir, item)
-                        if os.path.isdir(item_path) and item.startswith("page-"):
-                            for sub_f in os.listdir(item_path):
-                                if sub_f.lower().endswith((".jpeg", ".jpg", ".png")):
-                                    src_img = os.path.join(item_path, sub_f)
-                                    dst_img = os.path.join(root_dir, sub_f)
-                                    try:
-                                        with open(src_img, "rb") as sf, open(dst_img, "wb") as df:
-                                            df.write(sf.read())
-                                    except:
-                                        pass
 
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
@@ -552,10 +541,10 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
+                            page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img_[^)]+?\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                             
-                            # TRÍCH XUẤT VÀ CHÉP ĐÈ ẢNH TỪ MỚI TRỰC TIẾP RA THƯ MỤC GỐC
                             if hasattr(page, "images") and page.images:
                                 for img in page.images:
                                     if hasattr(img, "id") and hasattr(img, "image_base64") and img.image_base64:
@@ -571,12 +560,26 @@ with tab2:
                                         except: 
                                             pass
 
-                    # Biên dịch file Word bằng Pandoc kèm đường dẫn tài nguyên gốc
+                    # 2. QUÉT THÊM CÁC THƯ MỤC CON page-* ĐỂ ĐẢM BẢO KHÔNG SÓT ẢNH
+                    for item in os.listdir(root_dir):
+                        item_path = os.path.join(root_dir, item)
+                        if os.path.isdir(item_path) and item.startswith("page-"):
+                            for sub_f in os.listdir(item_path):
+                                if sub_f.lower().endswith((".jpeg", ".jpg", ".png")):
+                                    src_img = os.path.join(item_path, sub_f)
+                                    dst_img = os.path.join(root_dir, sub_f)
+                                    try:
+                                        with open(src_img, "rb") as sf, open(dst_img, "wb") as df:
+                                            df.write(sf.read())
+                                    except:
+                                        pass
+
+                    # Biên dịch file Word bằng Pandoc giữ đúng tên gốc
                     temp_md_path = "temp_input.md"
                     with open(temp_md_path, "w", encoding="utf-8") as f:
                         f.write(full_markdown)
                         
-                    output_docx = "Mistral_Output.docx"
+                    output_docx = f"{base_name_only}.docx"
                     pypandoc.convert_file(
                         temp_md_path, 
                         'docx', 
@@ -590,26 +593,28 @@ with tab2:
                     st.session_state.mistral_preview_markdown = full_markdown
                     st.session_state.active_images_dict = images_dict
                     st.session_state.mistral_docx_bytes = docx_bytes
-                    st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
+                    st.session_state.active_file_name = base_name_only
                     
                     if os.path.exists(temp_md_path): os.remove(temp_md_path)
-                    st.success("🎉 Xử lý Mistral OCR, gom ảnh từ thư mục page-* và tạo file Word thành công!")
+                    st.success(f"🎉 Xử lý thành công file `{original_full_name}`!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML và các nút tải xuống
+    # Hiển thị Khung Preview HTML và các nút tải xuống giữ nguyên tên file gốc
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
+        current_file_name = st.session_state.get("active_file_name", "Document")
+        
         col_m1, col_m2 = st.columns([2, 1])
         with col_m1:
-            st.subheader("👁️ Bản xem trước kết quả Mistral OCR")
+            st.subheader(f"👁️ Bản xem trước: {current_file_name}")
         with col_m2:
             if st.session_state.get("mistral_docx_bytes"):
                 st.download_button(
-                    label="📥 Tải xuống file Word (.docx) chuẩn Pandoc (Có đầy đủ ảnh)",
+                    label=f"📥 Tải Word: {current_file_name}.docx",
                     data=st.session_state.mistral_docx_bytes,
-                    file_name=f"{st.session_state.active_file_name}_Mistral.docx",
+                    file_name=f"{current_file_name}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
@@ -660,7 +665,7 @@ with tab2:
         <body>
             <div>
                 <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
-                <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu nhanh Word từ Preview</button>
+                <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Tải nhanh file Word (.docx)</button>
                 <span id="status-msg">✔ Thao tác thành công!</span>
             </div>
             <div class="preview-card" id="content-to-copy"></div>
@@ -700,14 +705,22 @@ with tab2:
 
             function saveAsWordDocx() {{
                 const contentHTML = document.getElementById('preview-box').innerHTML;
-                const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(converted);
-                link.download = "{st.session_state.active_file_name}_Preview.docx";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                showStatus("Đã tải xuống file Word nhanh thành công!");
+                if (typeof htmlDocx === 'undefined') {{
+                    alert('Thư viện htmlDocx chưa sẵn sàng, vui lòng thử lại!');
+                    return;
+                }}
+                try {{
+                    const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(converted);
+                    link.download = "{current_file_name}.docx";
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    showStatus("Đã tải xuống thành công!");
+                }} catch (err) {{
+                    alert('Lỗi xuất file: ' + err.message);
+                }}
             }}
 
             function showStatus(msg) {{
