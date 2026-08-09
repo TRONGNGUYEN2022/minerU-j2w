@@ -519,7 +519,7 @@ with tab2:
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
-	cleanup_old_temp_files()
+            cleanup_old_temp_files()
             with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và biên dịch file Word..."):
                 try:
                     client = Mistral(api_key=active_m_key)
