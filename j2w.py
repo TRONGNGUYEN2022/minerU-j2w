@@ -551,13 +551,13 @@ with tab2:
                                             img_bytes = base64.b64decode(img_b64)
                                             img_filename = f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_bytes
-                                            # Ghi đè trực tiếp vào thư mục gốc
+                                            # Ghi đè trực tiếp vào thư mục gốc để Pandoc nhận diện ảnh vật lý
                                             with open(os.path.join(root_dir, img_filename), "wb") as img_f:
                                                 img_f.write(img_bytes)
                                         except: 
                                             pass
 
-                    # Biên dịch file Word bằng Pandoc
+                    # Biên dịch file Word bằng Pandoc (Hỗ trợ nhúng đầy đủ ảnh vật lý vào file docx)
                     temp_md_path = "temp_input.md"
                     with open(temp_md_path, "w", encoding="utf-8") as f:
                         f.write(full_markdown)
@@ -578,7 +578,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML tối ưu render KaTeX
+    # Hiển thị Khung Preview HTML tối ưu render KaTeX và nút tải Word chuẩn Pandoc có nhúng ảnh
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
@@ -586,9 +586,9 @@ with tab2:
         with col_m1:
             st.subheader("👁️ Bản xem trước kết quả Mistral OCR")
         with col_m2:
-            if st.session_state.mistral_docx_bytes:
+            if st.session_state.get("mistral_docx_bytes"):
                 st.download_button(
-                    label="📥 Tải xuống file Word (.docx) chuẩn Pandoc",
+                    label="📥 Tải xuống file Word (.docx) chuẩn Pandoc (Có đầy đủ ảnh)",
                     data=st.session_state.mistral_docx_bytes,
                     file_name=f"{st.session_state.active_file_name}_Mistral.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -623,14 +623,11 @@ with tab2:
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
             <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
             <style>
                 body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; color: #2d3748; }}
                 .btn-action {{ padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
                 .btn-copy {{ background-color: #2b6cb0; }}
                 .btn-copy:hover {{ background-color: #2c5282; }}
-                .btn-word {{ background-color: #2f855a; }}
-                .btn-word:hover {{ background-color: #276749; }}
                 #status-msg {{ margin-left: 10px; color: #2f855a; font-weight: bold; font-size: 13px; display: none; }}
                 .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; line-height: 1.8; }}
                 table {{ border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748; }}
@@ -641,7 +638,6 @@ with tab2:
         <body>
             <div>
                 <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
-                <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu thành file Word (.docx) từ Preview</button>
                 <span id="status-msg">✔ Thao tác thành công!</span>
             </div>
             <div class="preview-card" id="content-to-copy"></div>
@@ -677,18 +673,6 @@ with tab2:
                     showStatus("Đã sao chép vào bộ nhớ tạm! Mở Word và nhấn Ctrl+V");
                 }} catch (err) {{ alert('Không thể sao chép tự động!'); }}
                 window.getSelection().removeAllRanges();
-            }}
-
-            function saveAsWordDocx() {{
-                const contentHTML = document.getElementById('content-to-copy').innerHTML;
-                const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(converted);
-                link.download = "{st.session_state.active_file_name}_Preview.docx";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                showStatus("Đã tải xuống file Word thành công!");
             }}
 
             function showStatus(msg) {{
