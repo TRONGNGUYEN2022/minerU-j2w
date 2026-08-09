@@ -213,7 +213,6 @@ def check_task_status_v4(api_token, task_id):
         pass
     return {}
 
-# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
 def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
     if not GEMINI_AVAILABLE:
         st.error("Chưa cài đặt thư viện `google-genai`.")
@@ -252,7 +251,6 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         st.error(f"Lỗi khi xử lý bằng Gemini: {e}")
         return None, {}
 
-# --- 3. HÀM QUÉT ĐƯỜNG DẪN ẢNH (MINERU) ---
 def collect_image_paths_from_block(block):
     paths = []
     for key in ["image_path", "img_path", "path", "src"]:
@@ -272,7 +270,6 @@ def collect_image_paths_from_block(block):
                         if val: paths.append(val)
     return paths
 
-# --- 4. RENDER PREVIEW CHO MINERU / GEMINI ---
 def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
     
@@ -343,19 +340,16 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}]}});"></script>
-        <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
         <style>
             body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; }}
             .btn-action {{ padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
             .btn-copy {{ background-color: #2b6cb0; }}
-            .btn-word {{ background-color: #2f855a; }}
             .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; }}
         </style>
     </head>
     <body>
         <div>
             <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
-            <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu thành file Word (.docx)</button>
             <span id="status-msg" style="margin-left: 10px; color: #2f855a; font-weight: bold; display: none;">✔ Thành công!</span>
         </div>
         <div class="preview-card" id="preview-box">{preview_inner_html}</div>
@@ -371,16 +365,6 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
             status.innerText = "✔ Đã sao chép!";
             status.style.display = 'inline';
             setTimeout(() => {{ status.style.display = 'none'; }}, 3000);
-        }}
-        function saveAsWordDocx() {{
-            const contentHTML = document.getElementById('preview-box').innerHTML;
-            const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(converted);
-            link.download = "{file_name}_Document.docx";
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
         }}
         </script>
     </body>
@@ -539,6 +523,7 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
+                            # Chuẩn hóa tên ảnh trong markdown để khớp dạng img-0.jpeg hoặc img_0.jpeg
                             page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
@@ -550,11 +535,15 @@ with tab2:
                                         img_b64 = img.image_base64
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
-                                            images_dict[f"{img_id}.jpeg"] = base64.b64decode(img_b64)
+                                            # Lưu với cả 2 định dạng gạch ngang và gạch dưới để đảm bảo Pandoc nhận diện được
+                                            clean_id = img_id.replace("_", "-")
+                                            img_data_decoded = base64.b64decode(img_b64)
+                                            images_dict[f"{clean_id}.jpeg"] = img_data_decoded
+                                            images_dict[f"{img_id}.jpeg"] = img_data_decoded
                                         except: 
                                             pass
 
-                    # --- SỬ DỤNG TEMPORARY DIRECTORY & CHDIR ĐỂ PANDOC NHÌN THẤY ẢNH ---
+                    # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY (FIX TRIỆT ĐỂ CHÈN ẢNH) ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         temp_md_path = os.path.join(tmp_dir, "temp_input.md")
                         with open(temp_md_path, "w", encoding="utf-8") as f:
@@ -569,7 +558,13 @@ with tab2:
                         
                         try:
                             output_docx = "Mistral_Output.docx"
-                            pypandoc.convert_file("temp_input.md", 'docx', outputfile=output_docx)
+                            # Thêm extra_args để ép Pandoc trích xuất và nhúng media chính xác
+                            pypandoc.convert_file(
+                                "temp_input.md", 
+                                'docx', 
+                                outputfile=output_docx, 
+                                extra_args=['--extract-media=.']
+                            )
                             with open(output_docx, "rb") as f:
                                 docx_bytes = f.read()
                             st.session_state.mistral_docx_bytes = docx_bytes
@@ -584,7 +579,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML
+    # Hiển thị Khung Preview HTML & Nút Tải Word Chuẩn (Bên ngoài iframe để tránh bị đơ)
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
@@ -629,14 +624,11 @@ with tab2:
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
             <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
             <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-            <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
             <style>
                 body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; color: #2d3748; }}
                 .btn-action {{ padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
                 .btn-copy {{ background-color: #2b6cb0; }}
                 .btn-copy:hover {{ background-color: #2c5282; }}
-                .btn-word {{ background-color: #2f855a; }}
-                .btn-word:hover {{ background-color: #276749; }}
                 #status-msg {{ margin-left: 10px; color: #2f855a; font-weight: bold; font-size: 13px; display: none; }}
                 .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; line-height: 1.8; }}
                 table {{ border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748; }}
@@ -647,8 +639,7 @@ with tab2:
         <body>
             <div>
                 <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
-                <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu thành file Word (.docx) từ Preview</button>
-                <span id="status-msg">✔ Thao tác thành công!</span>
+                <span id="status-msg">✔ Đã sao chép!</span>
             </div>
             <div class="preview-card" id="content-to-copy"></div>
 
@@ -683,18 +674,6 @@ with tab2:
                     showStatus("Đã sao chép vào bộ nhớ tạm! Mở Word và nhấn Ctrl+V");
                 }} catch (err) {{ alert('Không thể sao chép tự động!'); }}
                 window.getSelection().removeAllRanges();
-            }}
-
-            function saveAsWordDocx() {{
-                const contentHTML = document.getElementById('content-to-copy').innerHTML;
-                const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
-                const link = document.createElement('a');
-                link.href = URL.createObjectURL(converted);
-                link.download = "{st.session_state.active_file_name}_Preview.docx";
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                showStatus("Đã tải xuống file Word thành công!");
             }}
 
             function showStatus(msg) {{
