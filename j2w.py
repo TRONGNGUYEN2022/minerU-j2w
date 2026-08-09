@@ -542,9 +542,8 @@ with tab2:
                                             pass
 
                     # --- IN RA GIAO DIỆN DEBUG TÊN FILE ẢNH MISTRAL TRẢ VỀ ---
-                    st.info(f"🔍 Debug: Tổng số ảnh bóc tách được từ Mistral: {len(images_dict)}")
-                    if images_dict:
-                        st.write("Danh sách tên file ảnh trong `images_dict`:", list(images_dict.keys()))
+                    st.success(f"Đã bóc tách thành công {len(images_dict)} ảnh từ Mistral!")
+                    st.write("🔍 **Danh sách file ảnh Mistral trả về (`images_dict`):**", list(images_dict.keys()))
 
                     # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
