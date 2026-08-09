@@ -5,6 +5,7 @@ import os
 import re
 import zipfile
 import time
+import tempfile
 from bs4 import BeautifulSoup
 import requests
 import streamlit as st
@@ -97,7 +98,6 @@ if "mistral_docx_bytes" not in st.session_state:
 
 
 # --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
-# --- HÀM DỌN SẠCH FILE CŨ ---
 def cleanup_old_temp_files():
     root_dir = "."
     for f_name in os.listdir(root_dir):
@@ -489,7 +489,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Khung HTML Fix Triệt Để Toán Học)
+# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -534,57 +534,57 @@ with tab2:
                     )
                     
                     full_markdown = ""
-                    root_dir = "."
                     images_dict = {}
                     
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
-                            
-                            # 🛠️ SỬA LẠI ĐOẠN NÀY: Dùng pattern tổng quát chấp nhận cả dấu gạch ngang (-) lẫn gạch dưới (_)
                             page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
-                            
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                             
                             if hasattr(page, "images") and page.images:
                                 for img in page.images:
                                     if hasattr(img, "id") and hasattr(img, "image_base64") and img.image_base64:
-                                        img_id = img.id # Lưu ý: nếu server trả về id dạng "img-0", nó sẽ khớp với định dạng mới
+                                        img_id = img.id
                                         img_b64 = img.image_base64
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
-                                            img_bytes = base64.b64decode(img_b64)
-                                            # Đảm bảo tên file lưu xuống đúng chuẩn gạch ngang nếu server trả về dạng đó
-                                            img_filename = f"{img_id}.jpeg"
-                                            images_dict[img_filename] = img_bytes
-                                            with open(os.path.join(root_dir, img_filename), "wb") as img_f:
-                                                img_f.write(img_bytes)
+                                            images_dict[f"{img_id}.jpeg"] = base64.b64decode(img_b64)
                                         except: 
                                             pass
 
-                    # Biên dịch file Word bằng Pandoc
-                    temp_md_path = "temp_input.md"
-                    with open(temp_md_path, "w", encoding="utf-8") as f:
-                        f.write(full_markdown)
+                    # --- SỬ DỤNG TEMPORARY DIRECTORY & CHDIR ĐỂ PANDOC NHÌN THẤY ẢNH ---
+                    with tempfile.TemporaryDirectory() as tmp_dir:
+                        temp_md_path = os.path.join(tmp_dir, "temp_input.md")
+                        with open(temp_md_path, "w", encoding="utf-8") as f:
+                            f.write(full_markdown)
                         
-                    output_docx = "Mistral_Output.docx"
-                    pypandoc.convert_file(temp_md_path, 'docx', outputfile=output_docx, extra_args=['--standalone'])
-                    
-                    with open(output_docx, "rb") as f:
-                        docx_bytes = f.read()
+                        for img_name, img_bytes in images_dict.items():
+                            with open(os.path.join(tmp_dir, img_name), "wb") as img_f:
+                                img_f.write(img_bytes)
+                                
+                        original_dir = os.getcwd()
+                        os.chdir(tmp_dir)
+                        
+                        try:
+                            output_docx = "Mistral_Output.docx"
+                            pypandoc.convert_file("temp_input.md", 'docx', outputfile=output_docx)
+                            with open(output_docx, "rb") as f:
+                                docx_bytes = f.read()
+                            st.session_state.mistral_docx_bytes = docx_bytes
+                        finally:
+                            os.chdir(original_dir)
 
                     st.session_state.mistral_preview_markdown = full_markdown
                     st.session_state.active_images_dict = images_dict
-                    st.session_state.mistral_docx_bytes = docx_bytes
                     st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
                     
-                    if os.path.exists(temp_md_path): os.remove(temp_md_path)
                     st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML tối ưu render KaTeX
+    # Hiển thị Khung Preview HTML
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
