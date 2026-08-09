@@ -473,7 +473,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh & Debug View)
+# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh & Debug View Cố Định)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -541,9 +541,8 @@ with tab2:
                                         except: 
                                             pass
 
-                    # --- IN RA GIAO DIỆN DEBUG TÊN FILE ẢNH MISTRAL TRẢ VỀ ---
-                    st.success(f"Đã bóc tách thành công {len(images_dict)} ảnh từ Mistral!")
-                    st.write("🔍 **Danh sách file ảnh Mistral trả về (`images_dict`):**", list(images_dict.keys()))
+                    # --- LƯU VÀO SESSION STATE ĐỂ HIỂN THỊ CỐ ĐỊNH ---
+                    st.session_state.debug_images_keys = list(images_dict.keys())
 
                     # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
@@ -579,6 +578,11 @@ with tab2:
                     st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
+
+    # --- KHU VỰC HIỂN THỊ CỐ ĐỊNH TÊN FILE ẢNH DEBUG ---
+    if "debug_images_keys" in st.session_state and st.session_state.debug_images_keys:
+        st.info(f"🔍 **Thông tin Debug từ Mistral OCR:** Bóc tách được {len(st.session_state.debug_images_keys)} định danh ảnh.")
+        st.write("Danh sách tên file ảnh:", st.session_state.debug_images_keys)
 
     # Hiển thị Khung Preview HTML & Nút Tải Word Chuẩn
     if st.session_state.mistral_preview_markdown:
