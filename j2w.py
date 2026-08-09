@@ -26,12 +26,42 @@ try:
 except ImportError:
     MISTRAL_AVAILABLE = False
 
+# --- CẤU HÌNH LƯU KEY RA FILE TRÊN SERVER ---
+CONFIG_FILE = "config_keys.json"
+
+def load_saved_config():
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+def save_config(gemini_key, mistral_key, mineru_key):
+    config_data = {
+        "gemini_key": gemini_key,
+        "mistral_key": mistral_key,
+        "mineru_key": mineru_key
+    }
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, ensure_ascii=False, indent=4)
+    except:
+        pass
+
+# Đọc cấu hình đã lưu trên server (nếu có)
+saved_config = load_saved_config()
+
+DEFAULT_MINERU_KEY = saved_config.get("mineru_key", "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O")
+DEFAULT_GEMINI_KEY = saved_config.get("gemini_key", "AQ.Ab8RN6IiVh_ufztKik5rSMrl39c-U6_L6v5oy_Qru1-YNUBdRg")
+DEFAULT_MISTRAL_KEY = saved_config.get("mistral_key", "Asht2uDLjH8WTWnU06dBWdPbpcVQrbt5")
+
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word (MinerU - Mistral - Gemini)", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
-DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 
-# Tạo thư mục mặc định để lưu file tải về từ MinerU Web Extractor
+# Tạo thư mục mặc định để lưu file tải về
 DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
 os.makedirs(DEFAULT_DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(DEFAULT_DOWNLOAD_DIR, "images"), exist_ok=True)
@@ -43,6 +73,7 @@ if "gemini_key_editable" not in st.session_state:
     st.session_state.gemini_key_editable = False
 if "mistral_key_editable" not in st.session_state:
     st.session_state.mistral_key_editable = False
+
 if "active_json" not in st.session_state:
     st.session_state.active_json = None
 if "active_images_dict" not in st.session_state:
@@ -50,21 +81,22 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "Document"
 
-# Khởi tạo lưu trữ API Keys tự động trong session
+# Lưu trữ Key vào Session State
 if "saved_gemini_key" not in st.session_state:
-    st.session_state.saved_gemini_key = ""
+    st.session_state.saved_gemini_key = DEFAULT_GEMINI_KEY
 if "saved_mistral_key" not in st.session_state:
-    st.session_state.saved_mistral_key = ""
+    st.session_state.saved_mistral_key = DEFAULT_MISTRAL_KEY
+if "saved_mineru_key" not in st.session_state:
+    st.session_state.saved_mineru_key = DEFAULT_MINERU_KEY
 
-# Biến dành riêng cho kết quả hiển thị từ tab Mistral OCR
+# Biến riêng cho Mistral OCR
 if "mistral_preview_markdown" not in st.session_state:
     st.session_state.mistral_preview_markdown = ""
 if "mistral_docx_bytes" not in st.session_state:
     st.session_state.mistral_docx_bytes = None
 
 
-# --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG (MINERU & GEMINI) ---
-
+# --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
 def clean_and_wrap_latex(latex_str):
     if not latex_str: return ""
     clean_str = latex_str.strip()
@@ -112,7 +144,6 @@ def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
     return None
 
 # --- 2. API MINERU & UPLOAD DỰ PHÒNG ---
-
 def upload_temp_file_robust(uploaded_file):
     upload_services = [
         {"name": "Catbox", "url": "https://catbox.moe/user/api.php", "data": {"reqtype": "fileupload"}, "file_key": "fileToUpload"},
@@ -168,10 +199,9 @@ def check_task_status_v4(api_token, task_id):
         if response.status_code == 200:
             res_json = response.json()
             return res_json.get("data", {})
-    except Exception as e:
-        print(f"Lỗi kiểm tra task: {e}")
+    except Exception:
+        pass
     return {}
-
 
 # --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
 def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
@@ -185,9 +215,9 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         mime_type = uploaded_file.type
         
         prompt = (
-            "Bạn là một chuyên gia OCR và chuyển đổi tài liệu toán học. Hãy đọc tài liệu này thật chính xác tuyệt đối. "
-            "Yêu cầu cực kỳ quan trọng đối với công thức toán học: Tất cả các biểu thức toán học, phân số, số mũ, ký hiệu BẮT BUỘC phải được đặt trong cặp dấu đô la ($...$ cho inline hoặc $$...$$ cho block). "
-            "Trình bày kết quả cấu trúc thành một đoạn mã HTML sạch sẽ dùng thẻ <p>, <h3>, bảng dùng <table>. Chỉ trả về HTML hoàn chỉnh."
+            "Bạn là chuyên gia OCR và chuyển đổi tài liệu toán học. Hãy đọc tài liệu này chính xác tuyệt đối. "
+            "Tất cả các biểu thức toán học BẮT BUỘC phải được đặt trong cặp dấu đô la ($...$ cho inline hoặc $$...$$ cho block). "
+            "Trình bày kết quả bằng HTML sạch sẽ dùng thẻ <p>, <h3>, bảng dùng <table> có viền rõ ràng. Chỉ trả về HTML hoàn chỉnh."
         )
 
         response = client.models.generate_content(
@@ -209,9 +239,8 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
         }
         return simulated_json, {}
     except Exception as e:
-        st.error(f"Lỗi khi xử lý dự phòng bằng Gemini: {e}")
+        st.error(f"Lỗi khi xử lý bằng Gemini: {e}")
         return None, {}
-
 
 # --- 3. HÀM QUÉT ĐƯỜNG DẪN ẢNH (MINERU) ---
 def collect_image_paths_from_block(block):
@@ -232,7 +261,6 @@ def collect_image_paths_from_block(block):
                         val = span.get(key)
                         if val: paths.append(val)
     return paths
-
 
 # --- 4. RENDER PREVIEW CHO MINERU / GEMINI ---
 def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_name="document"):
@@ -301,6 +329,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     <!DOCTYPE html>
     <html>
     <head>
+        <meta charset="utf-8">
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
         <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}]}});"></script>
@@ -328,6 +357,10 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
             window.getSelection().addRange(range);
             try {{ document.execCommand('copy'); }} catch (err) {{}}
             window.getSelection().removeAllRanges();
+            const status = document.getElementById('status-msg');
+            status.innerText = "✔ Đã sao chép!";
+            status.style.display = 'inline';
+            setTimeout(() => {{ status.style.display = 'none'; }}, 3000);
         }}
         function saveAsWordDocx() {{
             const contentHTML = document.getElementById('preview-box').innerHTML;
@@ -346,9 +379,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     st.markdown("### 👁️ Bản xem trước Nội dung MinerU / Gemini")
     components.html(copier_component, height=750, scrolling=False)
 
-
 # --- 5. GIAO DIỆN CHÍNH (4 TABS) ---
-
 st.title("📐 Convert PDF/Image to word (MinerU - Mistral - Gemini)")
 
 tab1, tab2, tab3, tab4 = st.tabs([
@@ -358,21 +389,39 @@ tab1, tab2, tab3, tab4 = st.tabs([
     "📁 Tải file có sẵn (Offline)"
 ])
 
-# --- TAB 1: MINERU SERVER & GEMINI ---
+# ==========================================
+# TAB 1: MINERU SERVER & GEMINI
+# ==========================================
 with tab1:
     st.subheader("Cấu hình API Keys (MinerU & Gemini dự phòng)")
     col_k1, col_k2 = st.columns(2)
     with col_k1:
-        api_token_input = st.text_input("Nhập MinerU API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
+        api_token_input = st.text_input("Nhập MinerU API Token:", value=st.session_state.saved_mineru_key, type="password", disabled=not st.session_state.api_key_editable)
         if st.button("Đổi MinerU Key"):
             st.session_state.api_key_editable = not st.session_state.api_key_editable
+            st.rerun()
+        if st.session_state.api_key_editable and st.button("Lưu MinerU Key"):
+            st.session_state.saved_mineru_key = api_token_input
+            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+            st.session_state.api_key_editable = False
+            st.success("Đã lưu MinerU Key vào server!")
             st.rerun()
             
     with col_k2:
         def update_gemini_key():
             st.session_state.saved_gemini_key = st.session_state.gemini_input_field
-        gemini_token_input = st.text_input("Nhập Gemini API Key (Dự phòng):", value=st.session_state.saved_gemini_key, type="password", key="gemini_input_field", on_change=update_gemini_key)
-        if gemini_token_input: st.session_state.saved_gemini_key = gemini_token_input
+            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+
+        gemini_token_input = st.text_input("Nhập Gemini API Key (Dự phòng):", value=st.session_state.saved_gemini_key, type="password", disabled=not st.session_state.gemini_key_editable, key="gemini_input_field", on_change=update_gemini_key)
+        if st.button("Đổi Gemini Key"):
+            st.session_state.gemini_key_editable = not st.session_state.gemini_key_editable
+            st.rerun()
+        if st.session_state.gemini_key_editable and st.button("Lưu Gemini Key"):
+            st.session_state.saved_gemini_key = gemini_token_input
+            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+            st.session_state.gemini_key_editable = False
+            st.success("Đã lưu Gemini Key vào server!")
+            st.rerun()
 
     selected_gemini_model = st.selectbox("Chọn Model Gemini dự phòng:", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"], index=0)
     api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích qua MinerU", type=["pdf", "png", "jpg", "jpeg"], key="tab1_upload")
@@ -387,14 +436,14 @@ with tab1:
                 
             if file_url:
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
-                    task_id = start_mineru_task_by_url(api_token_input, file_url)
+                    task_id = start_mineru_task_by_url(st.session_state.saved_mineru_key, file_url)
                 if task_id:
                     st.success(f"Khởi tạo thành công! Task ID: `{task_id}`")
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     for i in range(40):
                         time.sleep(3)
-                        task_data = check_task_status_v4(api_token_input, task_id)
+                        task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
                         state = task_data.get("state")
                         status_text.text(f"Trạng thái MinerU: {state}")
                         if state == "done":
@@ -415,7 +464,7 @@ with tab1:
                         progress_bar.progress(min((i + 1) * 2, 100))
 
             if not success_processed:
-                active_key = st.session_state.saved_gemini_key.strip() or gemini_token_input.strip()
+                active_key = st.session_state.saved_gemini_key.strip()
                 if active_key:
                     with st.spinner(f"MinerU gặp sự cố. Đang tiến hành trích xuất dự phòng bằng {selected_gemini_model}..."):
                         g_json, g_imgs = fallback_process_with_gemini(api_file, active_key, selected_gemini_model)
@@ -429,17 +478,29 @@ with tab1:
                     st.error("MinerU thất bại và chưa có Gemini API Key dự phòng!")
 
 
-# --- TAB 2: MISTRAL OCR (API + Pandoc) ---
+# ==========================================
+# TAB 2: MISTRAL OCR (API + Pandoc + Xóa ảnh cũ & Ghi đè)
+# ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
     def update_mistral_key():
         st.session_state.saved_mistral_key = st.session_state.mistral_input_field
-    mistral_token_input = st.text_input("Nhập Mistral API Key:", value=st.session_state.saved_mistral_key, type="password", key="mistral_input_field", on_change=update_mistral_key)
-    if mistral_token_input: st.session_state.saved_mistral_key = mistral_token_input
+        save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+
+    mistral_token_input = st.text_input("Nhập Mistral API Key:", value=st.session_state.saved_mistral_key, type="password", disabled=not st.session_state.mistral_key_editable, key="mistral_input_field", on_change=update_mistral_key)
+    if st.button("Đổi Mistral Key"):
+        st.session_state.mistral_key_editable = not st.session_state.mistral_key_editable
+        st.rerun()
+    if st.session_state.mistral_key_editable and st.button("Lưu Mistral Key"):
+        st.session_state.saved_mistral_key = mistral_token_input
+        save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
+        st.session_state.mistral_key_editable = False
+        st.success("Đã lưu Mistral Key vào server!")
+        st.rerun()
 
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="mistral_upload")
     
-    if st.button("🚀 Gửi PDF lên Mistral OCR & Xuất Word"):
+    if st.button("🚀 Gửi PDF lên Mistral OCR & Phân tích"):
         active_m_key = st.session_state.saved_mistral_key.strip()
         if not mistral_file:
             st.warning("Vui lòng chọn file!")
@@ -448,8 +509,17 @@ with tab2:
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
-            with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và biên dịch file Word..."):
+            with st.spinner("Đang dọn dẹp ảnh cũ, gửi PDF lên Mistral OCR và biên dịch file Word..."):
                 try:
+                    # DỌN SẠCH CÁC FILE ẢNH CŨ VÀ FILE TẠM TRONG THƯ MỤC GỐC
+                    root_dir = "."
+                    for f_name in os.listdir(root_dir):
+                        if f_name.endswith(".jpeg") or f_name.endswith(".png") or f_name.endswith(".jpg") or f_name == "temp_input.md":
+                            try:
+                                os.remove(os.path.join(root_dir, f_name))
+                            except:
+                                pass
+
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
                     base64_file = base64.b64encode(file_bytes).decode('utf-8')
@@ -462,7 +532,6 @@ with tab2:
                     )
                     
                     full_markdown = ""
-                    root_dir = "."
                     images_dict = {}
                     
                     if hasattr(ocr_response, "pages"):
@@ -471,6 +540,7 @@ with tab2:
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                             
+                            # TRÍCH XUẤT VÀ CHÉP ĐÈ TẤT CẢ ẢNH TỪ TẤT CẢ CÁC TRANG RA THƯ MỤC GỐC
                             if hasattr(page, "images") and page.images:
                                 for img in page.images:
                                     if hasattr(img, "id") and hasattr(img, "image_base64") and img.image_base64:
@@ -481,10 +551,13 @@ with tab2:
                                             img_bytes = base64.b64decode(img_b64)
                                             img_filename = f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_bytes
+                                            # Ghi đè trực tiếp vào thư mục gốc
                                             with open(os.path.join(root_dir, img_filename), "wb") as img_f:
                                                 img_f.write(img_bytes)
-                                        except: pass
+                                        except: 
+                                            pass
 
+                    # Biên dịch file Word bằng Pandoc
                     temp_md_path = "temp_input.md"
                     with open(temp_md_path, "w", encoding="utf-8") as f:
                         f.write(full_markdown)
@@ -501,28 +574,30 @@ with tab2:
                     st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
                     
                     if os.path.exists(temp_md_path): os.remove(temp_md_path)
-                    st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
+                    st.success("🎉 Xử lý Mistral OCR, dọn ảnh cũ và tạo file Word thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Preview riêng cho Mistral nếu có
+    # Hiển thị Khung Preview HTML tối ưu render KaTeX
     if st.session_state.mistral_preview_markdown:
         st.divider()
+        
         col_m1, col_m2 = st.columns([2, 1])
         with col_m1:
             st.subheader("👁️ Bản xem trước kết quả Mistral OCR")
         with col_m2:
             if st.session_state.mistral_docx_bytes:
                 st.download_button(
-                    label="📥 Tải xuống file Word (.docx)",
+                    label="📥 Tải xuống file Word (.docx) chuẩn Pandoc",
                     data=st.session_state.mistral_docx_bytes,
                     file_name=f"{st.session_state.active_file_name}_Mistral.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
 
-        preview_md = st.session_state.mistral_preview_markdown
-        def replace_img_smart(match):
+        raw_md = st.session_state.mistral_preview_markdown
+        
+        def replace_img_smart_html(match):
             alt_text = match.group(1)
             raw_path = match.group(2)
             target_name = os.path.basename(raw_path)
@@ -533,18 +608,105 @@ with tab2:
                     break
             if matched_bytes:
                 b64_data = base64.b64encode(matched_bytes).decode('utf-8')
-                return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 6px; border: 1px solid #cbd5e0;" alt="{alt_text}" /></div>'
+                return f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/jpeg;base64,{b64_data}" style="max-width: 450px; border-radius: 8px; border: 1px solid #2d3748;" alt="{alt_text}" /></div>'
             return match.group(0)
 
-        preview_md = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart, preview_md)
-        preview_md = preview_md.replace(r"\(", "$").replace(r"\)", "$")
-        preview_md = preview_md.replace(r"\[", "$$").replace(r"\]", "$$")
+        processed_html = re.sub(r'!\[(.*?)\]\((.*?)\)', replace_img_smart_html, raw_md)
+        escaped_markdown_json = json.dumps(processed_html)
 
-        with st.container(border=True):
-            st.markdown(preview_md, unsafe_allow_html=True)
+        mistral_component_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+            <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+            <script src="https://cdn.jsdelivr.net/npm/html-docx-js@0.3.1/dist/html-docx.js"></script>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; color: #2d3748; }}
+                .btn-action {{ padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                .btn-copy {{ background-color: #2b6cb0; }}
+                .btn-copy:hover {{ background-color: #2c5282; }}
+                .btn-word {{ background-color: #2f855a; }}
+                .btn-word:hover {{ background-color: #276749; }}
+                #status-msg {{ margin-left: 10px; color: #2f855a; font-weight: bold; font-size: 13px; display: none; }}
+                .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; line-height: 1.8; }}
+                table {{ border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748; }}
+                th {{ border: 2px solid #2d3748; padding: 6px 10px; background-color: #edf2f7; font-weight: bold; text-align: center; }}
+                td {{ border: 2px solid #2d3748; padding: 6px 10px; vertical-align: middle; }}
+            </style>
+        </head>
+        <body>
+            <div>
+                <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
+                <button class="btn-action btn-word" onclick="saveAsWordDocx()">💾 Lưu thành file Word (.docx) từ Preview</button>
+                <span id="status-msg">✔ Thao tác thành công!</span>
+            </div>
+            <div class="preview-card" id="content-to-copy"></div>
+
+            <script>
+            const rawMarkdown = {escaped_markdown_json};
+            document.getElementById('content-to-copy').innerHTML = marked.parse(rawMarkdown);
+
+            function renderMath() {{
+                if (typeof renderMathInElement === 'function') {{
+                    renderMathInElement(document.getElementById('content-to-copy'), {{
+                        delimiters: [
+                            {{left: '$$', right: '$$', display: true}},
+                            {{left: '$', right: '$', display: false}},
+                            {{left: '\\\\[', right: '\\\\]', display: true}},
+                            {{left: '\\\\(', right: '\\\\)', display: false}}
+                        ],
+                        throwOnError: false
+                    }});
+                }}
+            }}
+
+            document.addEventListener("DOMContentLoaded", renderMath);
+            setTimeout(renderMath, 300);
+
+            function copyContentToClipboard() {{
+                const range = document.createRange();
+                range.selectNode(document.getElementById('content-to-copy'));
+                window.getSelection().removeAllRanges();
+                window.getSelection().addRange(range);
+                try {{
+                    document.execCommand('copy');
+                    showStatus("Đã sao chép vào bộ nhớ tạm! Mở Word và nhấn Ctrl+V");
+                }} catch (err) {{ alert('Không thể sao chép tự động!'); }}
+                window.getSelection().removeAllRanges();
+            }}
+
+            function saveAsWordDocx() {{
+                const contentHTML = document.getElementById('content-to-copy').innerHTML;
+                const converted = htmlDocx.asBlob('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' + contentHTML + '</body></html>');
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(converted);
+                link.download = "{st.session_state.active_file_name}_Preview.docx";
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                showStatus("Đã tải xuống file Word thành công!");
+            }}
+
+            function showStatus(msg) {{
+                const status = document.getElementById('status-msg');
+                status.innerText = "✔ " + msg;
+                status.style.display = 'inline';
+                setTimeout(() => {{ status.style.display = 'none'; }}, 4000);
+            }}
+            </script>
+        </body>
+        </html>
+        """
+        components.html(mistral_component_html, height=780, scrolling=False)
 
 
-# --- TAB 3: MINERU WEB EXTRACTOR ---
+# ==========================================
+# TAB 3: MINERU WEB EXTRACTOR
+# ==========================================
 with tab3:
     st.subheader("🌐 MinerU Web Extractor (Nhúng trực tiếp)")
     st.markdown("[🔗 Mở trang MinerU Web Extractor trong tab mới](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
@@ -568,7 +730,9 @@ with tab3:
             st.error(f"Lỗi: {e}")
 
 
-# --- TAB 4: TẢI FILE CÓ SẴN (OFFLINE) ---
+# ==========================================
+# TAB 4: TẢI FILE CÓ SẴN (OFFLINE)
+# ==========================================
 with tab4:
     st.subheader("📁 Nạp file layout.json hoặc file ZIP kết quả Offline")
     offline_file = st.file_uploader("Chọn file layout.json hoặc file ZIP kết quả", type=["json", "zip"], key="offline_all")
@@ -596,7 +760,9 @@ with tab4:
             st.error(f"Lỗi khi đọc file: {e}")
 
 
-# Hiển thị Preview chung cho MinerU / Gemini nếu có dữ liệu layout.json active
+# ==========================================
+# HIỂN THỊ PREVIEW CHO MINERU / GEMINI
+# ==========================================
 if st.session_state.active_json is not None:
     st.divider()
     render_pure_math_preview(
