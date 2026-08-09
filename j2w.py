@@ -540,22 +540,28 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
+                            
+                            # 🛠️ SỬA LẠI ĐOẠN NÀY: Dùng pattern tổng quát chấp nhận cả dấu gạch ngang (-) lẫn gạch dưới (_)
+                            page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
+                            
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                             
                             if hasattr(page, "images") and page.images:
                                 for img in page.images:
                                     if hasattr(img, "id") and hasattr(img, "image_base64") and img.image_base64:
-                                        img_id = img.id
+                                        img_id = img.id # Lưu ý: nếu server trả về id dạng "img-0", nó sẽ khớp với định dạng mới
                                         img_b64 = img.image_base64
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
                                             img_bytes = base64.b64decode(img_b64)
+                                            # Đảm bảo tên file lưu xuống đúng chuẩn gạch ngang nếu server trả về dạng đó
                                             img_filename = f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_bytes
                                             with open(os.path.join(root_dir, img_filename), "wb") as img_f:
                                                 img_f.write(img_bytes)
-                                        except: pass
+                                        except: 
+                                            pass
 
                     # Biên dịch file Word bằng Pandoc
                     temp_md_path = "temp_input.md"
