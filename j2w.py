@@ -11,6 +11,14 @@ import streamlit as st
 import streamlit.components.v1 as components
 import pypandoc
 
+# Thư viện Google Drive API
+try:
+    from googleapiclient.discovery import build
+    from google.oauth2 import service_account
+    DRIVE_AVAILABLE = True
+except ImportError:
+    DRIVE_AVAILABLE = False
+
 # Import thư viện google-genai chính thức mới nhất
 try:
     from google import genai
@@ -26,40 +34,12 @@ try:
 except ImportError:
     MISTRAL_AVAILABLE = False
 
-# --- CẤU HÌNH LƯU KEY RA FILE TRÊN SERVER ---
-CONFIG_FILE = "config_keys.json"
-
-def load_saved_config():
-    if os.path.exists(CONFIG_FILE):
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            pass
-    return {}
-
-def save_config(gemini_key, mistral_key, mineru_key):
-    config_data = {
-        "gemini_key": gemini_key,
-        "mistral_key": mistral_key,
-        "mineru_key": mineru_key
-    }
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config_data, f, ensure_ascii=False, indent=4)
-    except:
-        pass
-
-# Đọc cấu hình đã lưu trên server (nếu có)
-saved_config = load_saved_config()
-
-DEFAULT_MINERU_KEY = saved_config.get("mineru_key", "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O")
-DEFAULT_GEMINI_KEY = saved_config.get("gemini_key", "AQ.Ab8RN6IiVh_ufztKik5rSMrl39c-U6_L6v5oy_Qru1-YNUBdRg")
-DEFAULT_MISTRAL_KEY = saved_config.get("mistral_key", "Asht2uDLjH8WTWnU06dBWdPbpcVQrbt5")
-
 # --- CẤU HÌNH GIAO DIỆN ---
-st.set_page_config(page_title="Convert PDF/Image to word (MinerU - Mistral - Gemini)", page_icon="📐", layout="wide")
+st.set_page_config(page_title="Convert PDF/Image to word (Drive + MinerU)", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
+DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
+SERVICE_ACCOUNT_FILE = 'service-account.json'
+SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
 # Tạo thư mục mặc định để lưu file tải về
 DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
@@ -73,7 +53,6 @@ if "gemini_key_editable" not in st.session_state:
     st.session_state.gemini_key_editable = False
 if "mistral_key_editable" not in st.session_state:
     st.session_state.mistral_key_editable = False
-
 if "active_json" not in st.session_state:
     st.session_state.active_json = None
 if "active_images_dict" not in st.session_state:
@@ -81,13 +60,13 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "Document"
 
-# Lưu trữ Key vào Session State
+# Lưu trữ API Keys tự động
 if "saved_gemini_key" not in st.session_state:
-    st.session_state.saved_gemini_key = DEFAULT_GEMINI_KEY
+    st.session_state.saved_gemini_key = ""
 if "saved_mistral_key" not in st.session_state:
-    st.session_state.saved_mistral_key = DEFAULT_MISTRAL_KEY
-if "saved_mineru_key" not in st.session_state:
-    st.session_state.saved_mineru_key = DEFAULT_MINERU_KEY
+    st.session_state.saved_mistral_key = ""
+if "drive_folder_id" not in st.session_state:
+    st.session_state.drive_folder_id = ""
 
 # Biến riêng cho Mistral OCR
 if "mistral_preview_markdown" not in st.session_state:
@@ -143,8 +122,40 @@ def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
             
     return None
 
-# --- 2. API MINERU & UPLOAD DỰ PHÒNG ---
-def upload_temp_file_robust(uploaded_file):
+# --- 2. GOOGLE DRIVE & UPLOAD DỰ PHÒNG ROBUST ---
+def upload_to_google_drive(uploaded_file, folder_id):
+    if not DRIVE_AVAILABLE or not os.path.exists(SERVICE_ACCOUNT_FILE):
+        return None
+    try:
+        creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+        service = build('drive', 'v3', credentials=creds)
+        
+        file_metadata = {'name': uploaded_file.name, 'parents': [folder_id]}
+        media = io.BytesIO(uploaded_file.getvalue())
+        
+        # Upload file lên Drive
+        file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+        file_id = file.get('id')
+        
+        # Đổi quyền file thành public (Anyone with the link can view) để MinerU tải được
+        permission = {'type': 'anyone', 'role': 'reader'}
+        service.permissions().create(fileId=file_id, body=permission).execute()
+        
+        # Trả về Direct Link của Google Drive
+        direct_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        return direct_url
+    except Exception as e:
+        print(f"Lỗi upload Google Drive: {e}")
+        return None
+
+def upload_temp_file_robust(uploaded_file, folder_id=""):
+    # 1. ƯU TIÊN SỐ 1: Google Drive nếu có nhập Folder ID
+    if folder_id and DRIVE_AVAILABLE and os.path.exists(SERVICE_ACCOUNT_FILE):
+        drive_url = upload_to_google_drive(uploaded_file, folder_id)
+        if drive_url:
+            return drive_url
+
+    # 2. PHƯƠNG ÁN DỰ PHÒNG PHỤ: Catbox, Litterbox, TmpFiles
     upload_services = [
         {"name": "Catbox", "url": "https://catbox.moe/user/api.php", "data": {"reqtype": "fileupload"}, "file_key": "fileToUpload"},
         {"name": "Litterbox", "url": "https://litterbox.catbox.moe/resources/api.php", "data": {"reqtype": "fileupload", "time": "24h"}, "file_key": "fileToUpload"},
@@ -380,7 +391,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     components.html(copier_component, height=750, scrolling=False)
 
 # --- 5. GIAO DIỆN CHÍNH (4 TABS) ---
-st.title("📐 Convert PDF/Image to word (MinerU - Mistral - Gemini)")
+st.title("📐 Convert PDF/Image to word (Google Drive + MinerU)")
 
 tab1, tab2, tab3, tab4 = st.tabs([
     "🚀 Gửi lên MinerU Server (API)", 
@@ -390,60 +401,51 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1: MINERU SERVER & GEMINI
+# TAB 1: MINERU SERVER & GEMINI (Tích hợp Google Drive làm chính)
 # ==========================================
 with tab1:
-    st.subheader("Cấu hình API Keys (MinerU & Gemini dự phòng)")
+    st.subheader("Cấu hình Google Drive & API Keys")
+    
+    # Cấu hình Google Drive Folder ID
+    st.session_state.drive_folder_id = st.text_input("Nhập Google Drive Folder ID (Dùng làm server trung gian chính):", value=st.session_state.drive_folder_id, placeholder="Ví dụ: 1B2C3D4E5F6G7H8I9J0...")
+    if not os.path.exists(SERVICE_ACCOUNT_FILE):
+        st.warning("⚠️ Chưa tìm thấy file `service-account.json`. Hệ thống sẽ tự động dùng Catbox/Litterbox làm dự phòng nếu không nhập Drive ID hoặc thiếu file này.")
+
     col_k1, col_k2 = st.columns(2)
     with col_k1:
-        api_token_input = st.text_input("Nhập MinerU API Token:", value=st.session_state.saved_mineru_key, type="password", disabled=not st.session_state.api_key_editable)
+        api_token_input = st.text_input("Nhập MinerU API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
         if st.button("Đổi MinerU Key"):
             st.session_state.api_key_editable = not st.session_state.api_key_editable
-            st.rerun()
-        if st.session_state.api_key_editable and st.button("Lưu MinerU Key"):
-            st.session_state.saved_mineru_key = api_token_input
-            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
-            st.session_state.api_key_editable = False
-            st.success("Đã lưu MinerU Key vào server!")
             st.rerun()
             
     with col_k2:
         def update_gemini_key():
             st.session_state.saved_gemini_key = st.session_state.gemini_input_field
-            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
-
-        gemini_token_input = st.text_input("Nhập Gemini API Key (Dự phòng):", value=st.session_state.saved_gemini_key, type="password", disabled=not st.session_state.gemini_key_editable, key="gemini_input_field", on_change=update_gemini_key)
-        if st.button("Đổi Gemini Key"):
-            st.session_state.gemini_key_editable = not st.session_state.gemini_key_editable
-            st.rerun()
-        if st.session_state.gemini_key_editable and st.button("Lưu Gemini Key"):
-            st.session_state.saved_gemini_key = gemini_token_input
-            save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
-            st.session_state.gemini_key_editable = False
-            st.success("Đã lưu Gemini Key vào server!")
-            st.rerun()
+        gemini_token_input = st.text_input("Nhập Gemini API Key (Dự phòng):", value=st.session_state.saved_gemini_key, type="password", key="gemini_input_field", on_change=update_gemini_key)
+        if gemini_token_input: st.session_state.saved_gemini_key = gemini_token_input
 
     selected_gemini_model = st.selectbox("Chọn Model Gemini dự phòng:", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"], index=0)
     api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích qua MinerU", type=["pdf", "png", "jpg", "jpeg"], key="tab1_upload")
     
-    if st.button("📤 Gửi & Phân tích qua MinerU"):
+    if st.button("📤 Gửi & Phân tích qua MinerU (Ưu tiên Google Drive)"):
         if not api_file:
             st.warning("Vui lòng chọn file!")
         else:
             success_processed = False
-            with st.spinner("Đang tải file lên máy chủ trung gian..."):
-                file_url = upload_temp_file_robust(api_file)
+            with st.spinner("Đang tải file lên Google Drive (Server trung gian)..."):
+                file_url = upload_temp_file_robust(api_file, st.session_state.drive_folder_id.strip())
                 
             if file_url:
+                st.info(f"Đã tạo đường dẫn trung gian thành công. Đang khởi tạo tác vụ trên MinerU...")
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
-                    task_id = start_mineru_task_by_url(st.session_state.saved_mineru_key, file_url)
+                    task_id = start_mineru_task_by_url(api_token_input, file_url)
                 if task_id:
                     st.success(f"Khởi tạo thành công! Task ID: `{task_id}`")
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     for i in range(40):
                         time.sleep(3)
-                        task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
+                        task_data = check_task_status_v4(api_token_input, task_id)
                         state = task_data.get("state")
                         status_text.text(f"Trạng thái MinerU: {state}")
                         if state == "done":
@@ -464,7 +466,7 @@ with tab1:
                         progress_bar.progress(min((i + 1) * 2, 100))
 
             if not success_processed:
-                active_key = st.session_state.saved_gemini_key.strip()
+                active_key = st.session_state.saved_gemini_key.strip() or gemini_token_input.strip()
                 if active_key:
                     with st.spinner(f"MinerU gặp sự cố. Đang tiến hành trích xuất dự phòng bằng {selected_gemini_model}..."):
                         g_json, g_imgs = fallback_process_with_gemini(api_file, active_key, selected_gemini_model)
@@ -485,18 +487,8 @@ with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
     def update_mistral_key():
         st.session_state.saved_mistral_key = st.session_state.mistral_input_field
-        save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
-
-    mistral_token_input = st.text_input("Nhập Mistral API Key:", value=st.session_state.saved_mistral_key, type="password", disabled=not st.session_state.mistral_key_editable, key="mistral_input_field", on_change=update_mistral_key)
-    if st.button("Đổi Mistral Key"):
-        st.session_state.mistral_key_editable = not st.session_state.mistral_key_editable
-        st.rerun()
-    if st.session_state.mistral_key_editable and st.button("Lưu Mistral Key"):
-        st.session_state.saved_mistral_key = mistral_token_input
-        save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
-        st.session_state.mistral_key_editable = False
-        st.success("Đã lưu Mistral Key vào server!")
-        st.rerun()
+    mistral_token_input = st.text_input("Nhập Mistral API Key:", value=st.session_state.saved_mistral_key, type="password", key="mistral_input_field", on_change=update_mistral_key)
+    if mistral_token_input: st.session_state.saved_mistral_key = mistral_token_input
 
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="mistral_upload")
     
