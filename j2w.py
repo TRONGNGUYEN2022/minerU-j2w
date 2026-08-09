@@ -473,7 +473,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh)
+# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh & Debug View)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -523,7 +523,6 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
-                            # Chuẩn hóa tên ảnh trong markdown để khớp dạng img-0.jpeg hoặc img_0.jpeg
                             page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
@@ -535,7 +534,6 @@ with tab2:
                                         img_b64 = img.image_base64
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
-                                            # Lưu với cả 2 định dạng gạch ngang và gạch dưới để đảm bảo Pandoc nhận diện được
                                             clean_id = img_id.replace("_", "-")
                                             img_data_decoded = base64.b64decode(img_b64)
                                             images_dict[f"{clean_id}.jpeg"] = img_data_decoded
@@ -543,7 +541,12 @@ with tab2:
                                         except: 
                                             pass
 
-                    # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY (FIX TRIỆT ĐỂ CHÈN ẢNH) ---
+                    # --- IN RA GIAO DIỆN DEBUG TÊN FILE ẢNH MISTRAL TRẢ VỀ ---
+                    st.info(f"🔍 Debug: Tổng số ảnh bóc tách được từ Mistral: {len(images_dict)}")
+                    if images_dict:
+                        st.write("Danh sách tên file ảnh trong `images_dict`:", list(images_dict.keys()))
+
+                    # --- XỬ LÝ PANDOC TRONG TEMPORARY DIRECTORY ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         temp_md_path = os.path.join(tmp_dir, "temp_input.md")
                         with open(temp_md_path, "w", encoding="utf-8") as f:
@@ -558,7 +561,6 @@ with tab2:
                         
                         try:
                             output_docx = "Mistral_Output.docx"
-                            # Thêm extra_args để ép Pandoc trích xuất và nhúng media chính xác
                             pypandoc.convert_file(
                                 "temp_input.md", 
                                 'docx', 
@@ -579,7 +581,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML & Nút Tải Word Chuẩn (Bên ngoài iframe để tránh bị đơ)
+    # Hiển thị Khung Preview HTML & Nút Tải Word Chuẩn
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
