@@ -10,39 +10,22 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
-# Import thư viện google-genai chính thức mới nhất
-try:
-    from google import genai
-    from google.genai import types
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
 DEFAULT_API_KEY = "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O"
 
-# Tạo thư mục mặc định để lưu file tải về từ MinerU Web Extractor
-DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
-os.makedirs(DEFAULT_DOWNLOAD_DIR, exist_ok=True)
-os.makedirs(os.path.join(DEFAULT_DOWNLOAD_DIR, "images"), exist_ok=True)
-
 # --- KHỞI TẠO SESSION STATE ---
 if "api_key_editable" not in st.session_state:
     st.session_state.api_key_editable = False
-if "gemini_key_editable" not in st.session_state:
-    st.session_state.gemini_key_editable = False
 if "active_json" not in st.session_state:
     st.session_state.active_json = None
 if "active_images_dict" not in st.session_state:
     st.session_state.active_images_dict = {}
+if "extracted_images_dir" not in st.session_state:
+    st.session_state.extracted_images_dir = ""
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "MinerU_Document"
-
-# Khởi tạo lưu trữ Gemini API Key tự động trong session
-if "saved_gemini_key" not in st.session_state:
-    st.session_state.saved_gemini_key = ""
 
 # --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
 
@@ -92,56 +75,17 @@ def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
             
     return None
 
-# --- 2. API MINERU & UPLOAD DỰ PHÒNG ---
+# --- 2. API MINERU ---
 
-def upload_temp_file_robust(uploaded_file):
-    upload_services = [
-        {
-            "name": "Catbox",
-            "url": "https://catbox.moe/user/api.php",
-            "data": {"reqtype": "fileupload"},
-            "file_key": "fileToUpload"
-        },
-        {
-            "name": "Litterbox",
-            "url": "https://litterbox.catbox.moe/resources/api.php",
-            "data": {"reqtype": "fileupload", "time": "24h"},
-            "file_key": "fileToUpload"
-        },
-        {
-            "name": "TmpFiles",
-            "url": "https://tmpfiles.org/api/v1/upload",
-            "data": {},
-            "file_key": "file"
-        }
-    ]
-    
-    file_bytes = uploaded_file.getvalue()
-    file_name = uploaded_file.name
-    file_type = uploaded_file.type
-
-    for service in upload_services:
-        try:
-            files = {service["file_key"]: (file_name, file_bytes, file_type)}
-            res = requests.post(service["url"], data=service["data"], files=files, timeout=30)
-            
-            if res.status_code == 200:
-                result_text = res.text.strip()
-                if service["name"] == "TmpFiles":
-                    try:
-                        res_json = res.json()
-                        if res_json.get("status") == "success":
-                            raw_url = res_json.get("data", {}).get("url", "")
-                            if "tmpfiles.org/" in raw_url and not "tmpfiles.org/dl/" in raw_url:
-                                raw_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
-                            return raw_url
-                    except:
-                        pass
-                elif result_text.startswith("http"):
-                    return result_text
-        except Exception:
-            continue
-            
+def upload_temp_file_catbox(uploaded_file):
+    upload_url = "https://catbox.moe/user/api.php"
+    files = {"fileToUpload": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+    try:
+        res = requests.post(upload_url, data={"reqtype": "fileupload"}, files=files, timeout=60)
+        if res.status_code == 200 and res.text.startswith("http"):
+            return res.text.strip()
+    except Exception as e:
+        st.error(f"Lỗi upload file tạm: {e}")
     return None
 
 def start_mineru_task_by_url(api_token, file_url):
@@ -163,69 +107,9 @@ def check_task_status_v4(api_token, task_id):
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
-            res_json = response.json()
-            data = res_json.get("data", {})
-            # Bắt toàn bộ chi tiết lỗi thô từ server nếu task thất bại
-            if data.get("state") == "failed":
-                print(f"DEBUG MINERU ERROR RAW: {res_json}")
-            return data
-    except Exception as e:
-        print(f"Lỗi kiểm tra task: {e}")
-    return {}
-
-
-# --- 2.1 HÀM XỬ LÝ DỰ PHÒNG BẰNG GEMINI API ---
-def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
-    if not GEMINI_AVAILABLE:
-        st.error("Chưa cài đặt thư viện `google-genai`. Vui lòng thêm `google-genai` vào requirements.txt")
-        return None, {}
-    
-    try:
-        client = genai.Client(api_key=gemini_api_key)
-        file_bytes = uploaded_file.getvalue()
-        mime_type = uploaded_file.type
-        
-        prompt = (
-            "Bạn là một chuyên gia OCR và chuyển đổi tài liệu toán học. Hãy đọc tài liệu này thật chính xác tuyệt đối. "
-            "Yêu cầu cực kỳ quan trọng đối với công thức toán học: Tất cả các biểu thức toán học, phân số, số mũ, ký hiệu (như \\frac, \\pm, \\cdot, v.v.) BẮT BUỘC phải được đặt trong cặp dấu đô la ($...$ cho công thức inline hoặc $$...$$ cho công thức đứng dòng riêng biệt). Không được để mã LaTeX trần trụi ngoài văn bản. "
-            "Trình bày kết quả cấu trúc thành một đoạn mã HTML sạch sẽ, trong đó các đoạn văn dùng thẻ <p>, tiêu đề dùng thẻ <h3> hoặc <b>, bảng biểu dùng thẻ <table> được đóng khung viền rõ ràng. "
-            "Chỉ trả về nội dung HTML hoàn chỉnh, không kèm theo giải thích gì thêm."
-        )
-
-        response = client.models.generate_content(
-            model=selected_model,
-            contents=[
-                types.Part.from_bytes(data=file_bytes, mime_type=mime_type),
-                prompt
-            ]
-        )
-        
-        html_content = response.text
-        html_content = re.sub(r"^```html\s*", "", html_content, flags=re.IGNORECASE)
-        html_content = re.sub(r"\s*```$", "", html_content)
-
-        simulated_json = {
-            "pdf_info": [
-                {
-                    "para_blocks": [
-                        {
-                            "type": "text",
-                            "lines": [
-                                {
-                                    "spans": [
-                                        {"type": "text", "content": html_content}
-                                    ]
-                                }
-                            ]
-                        }
-                    ]
-                }
-            ]
-        }
-        return simulated_json, {}
-    except Exception as e:
-        st.error(f"Lỗi khi xử lý dự phòng bằng Gemini: {e}")
-        return None, {}
+            return response.json().get("data", {})
+    except: pass
+    return None
 
 
 # --- 3. HÀM QUÉT ĐƯỜNG DẪN ẢNH TOÀN DIỆN ---
@@ -249,7 +133,7 @@ def collect_image_paths_from_block(block):
     return paths
 
 
-# --- 4. RENDER PREVIEW ---
+# --- 4. RENDER PREVIEW (BẢNG BIỂU TỰ ĐỘNG FIT THEO NỘI DUNG & ĐƯỜNG VIỀN ĐẬM) ---
 
 def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
@@ -303,6 +187,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
                             if table_html:
                                 soup = BeautifulSoup(table_html, "html.parser")
                                 
+                                # Tự động fit theo nội dung (width: auto / max-content) và tô đậm đường viền
                                 for table_tag in soup.find_all("table"):
                                     table_tag['style'] = "border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748;"
                                 for th_tag in soup.find_all("th"):
@@ -391,43 +276,21 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
 
 # --- 5. GIAO DIỆN CHÍNH ---
 
-st.title("📐 Convert PDF/Image to word")
+st.title("📐 MinerU Math Equation Preview & Pro")
 
-tab1, tab2, tab3 = st.tabs([
-    "🚀 Gửi lên MinerU Server (API)", 
-    "🌐 MinerU Web Extractor", 
-    "📁 Tải file layout.json & Ảnh có sẵn (Offline)"
-])
+tab1, tab2 = st.tabs(["🚀 Gửi lên MinerU Server (API)", "📁 Tải file layout.json & Ảnh có sẵn (Offline)"])
 
 with tab1:
-    st.subheader("Cấu hình API Keys & Model")
-    
-    col_k1, col_k2 = st.columns(2)
+    st.subheader("Cấu hình API Key")
+    col_k1, col_k2 = st.columns([5, 1])
     with col_k1:
-        api_token_input = st.text_input("Nhập MinerU API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
-        if st.button("Đổi MinerU Key"):
+        api_token_input = st.text_input("Nhập API Token:", value=DEFAULT_API_KEY, type="password", disabled=not st.session_state.api_key_editable)
+    with col_k2:
+        st.write("")
+        st.write("")
+        if st.button("Change / Đổi"):
             st.session_state.api_key_editable = not st.session_state.api_key_editable
             st.rerun()
-            
-    with col_k2:
-        def update_gemini_key():
-            st.session_state.saved_gemini_key = st.session_state.gemini_input_field
-
-        gemini_token_input = st.text_input(
-            "Nhập Gemini API Key (Dự phòng):", 
-            value=st.session_state.saved_gemini_key, 
-            type="password",
-            key="gemini_input_field",
-            on_change=update_gemini_key
-        )
-        if gemini_token_input:
-            st.session_state.saved_gemini_key = gemini_token_input
-
-    selected_gemini_model = st.selectbox(
-        "Chọn Model Gemini dự phòng:",
-        ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"],
-        index=0
-    )
 
     api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích", type=["pdf", "png", "jpg", "jpeg"])
     
@@ -435,11 +298,8 @@ with tab1:
         if not api_file:
             st.warning("Vui lòng chọn file!")
         else:
-            success_processed = False
-            
             with st.spinner("Đang tải file lên máy chủ trung gian..."):
-                file_url = upload_temp_file_robust(api_file)
-                
+                file_url = upload_temp_file_catbox(api_file)
             if file_url:
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
                     task_id = start_mineru_task_by_url(api_token_input, file_url)
@@ -451,7 +311,7 @@ with tab1:
                         time.sleep(3)
                         task_data = check_task_status_v4(api_token_input, task_id)
                         state = task_data.get("state")
-                        status_text.text(f"Trạng thái MinerU: {state}")
+                        status_text.text(f"Trạng thái: {state}")
                         if state == "done":
                             full_zip_url = task_data.get("full_zip_url")
                             r_zip = requests.get(full_zip_url)
@@ -461,75 +321,17 @@ with tab1:
                                     st.session_state.active_json = found_json
                                     st.session_state.active_images_dict = images_dict
                                     st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
-                                    st.success("Đã hoàn tất phân tích bằng MinerU!")
-                                    success_processed = True
+                                    st.success("Đã hoàn tất phân tích!")
                                     st.rerun()
                             break
                         elif state == "failed":
-                            # Bóc tách tường minh chi tiết lỗi từ server
-                            err_msg = task_data.get('err_msg') or task_data.get('error') or task_data.get('message') or "Không có mô tả chi tiết từ server"
-                            st.warning(f"MinerU báo lỗi chi tiết: {err_msg}. Đang chuyển sang dự phòng bằng Gemini...")
+                            st.error(f"Xử lý thất bại: {task_data.get('err_msg')}")
                             break
                         progress_bar.progress(min((i + 1) * 2, 100))
 
-            if not success_processed:
-                active_key = st.session_state.saved_gemini_key.strip() or gemini_token_input.strip()
-                if active_key:
-                    with st.spinner(f"MinerU gặp sự cố. Đang tiến hành trích xuất bằng {selected_gemini_model}..."):
-                        g_json, g_imgs = fallback_process_with_gemini(api_file, active_key, selected_gemini_model)
-                        if g_json:
-                            st.session_state.active_json = g_json
-                            st.session_state.active_images_dict = g_imgs
-                            st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
-                            st.success(f"Đã hoàn tất trích xuất thay thế bằng {selected_gemini_model} thành công!")
-                            st.rerun()
-                else:
-                    st.error("MinerU thất bại và bạn chưa nhập Gemini API Key để dùng làm phương án dự phòng!")
-
 with tab2:
-    st.subheader("🌐 MinerU Web Extractor (Nhúng trực tiếp)")
-    st.markdown("Trang web chính thức được nhúng bên dưới. Bạn có thể thao tác trực tiếp hoặc bấm vào nút mở tab mới nếu trình duyệt chặn khung nhúng.")
-    st.markdown("[🔗 Mở trang MinerU Web Extractor trong tab mới](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
-    
-    # Nhúng trực tiếp trang web
-    components.iframe("https://mineru.net/OpenSourceTools/Extractor", height=650, scrolling=True)
-    
-    st.divider()
-    st.subheader("📥 Nhận file kết quả từ Web Extractor vào Thư mục Tự động")
-    st.markdown(f"Sau khi tải file giải nén từ trang web trên về máy, hãy tải file `layout.json` và thư mục `images` lên đây để hệ thống tự động lưu vào thư mục `{DEFAULT_DOWNLOAD_DIR}/` và xử lý chuyển đổi Word:")
-
-    web_json_f = st.file_uploader("Tải file layout.json từ gói kết quả Web", type=["json"], key="web_json_tab2")
-    web_image_files = st.file_uploader("Tải toàn bộ file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="web_imgs_tab2")
-    
-    if web_json_f:
-        try:
-            json_bytes = web_json_f.getvalue()
-            json_path = os.path.join(DEFAULT_DOWNLOAD_DIR, web_json_f.name)
-            with open(json_path, "wb") as f:
-                f.write(json_bytes)
-
-            st.session_state.active_json = json.loads(json_bytes.decode("utf-8"))
-            st.session_state.active_file_name = web_json_f.name.rsplit(".", 1)[0]
-            
-            if web_image_files:
-                images_dict = {}
-                img_dir_path = os.path.join(DEFAULT_DOWNLOAD_DIR, "images")
-                os.makedirs(img_dir_path, exist_ok=True)
-                for img in web_image_files:
-                    img_bytes = img.getvalue()
-                    images_dict[img.name] = img_bytes
-                    with open(os.path.join(img_dir_path, img.name), "wb") as img_f:
-                        img_f.write(img_bytes)
-                st.session_state.active_images_dict = images_dict
-                
-            st.success(f"Đã lưu và tự động nạp dữ liệu thành công từ thư mục `{DEFAULT_DOWNLOAD_DIR}/`!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Lỗi khi xử lý file: {e}")
-
-with tab3:
-    json_f = st.file_uploader("Chọn file layout.json", type=["json"], key="offline_json")
-    image_files = st.file_uploader("Chọn các file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="offline_imgs")
+    json_f = st.file_uploader("Chọn file layout.json", type=["json"])
+    image_files = st.file_uploader("Chọn các file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
     if json_f:
         try:
             st.session_state.active_json = json.loads(json_f.getvalue().decode("utf-8"))
