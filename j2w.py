@@ -489,7 +489,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (GIỮ TÊN GỐC & GOM ẢNH TOÀN DIỆN TỪ MỌI THƯ MỤC)
+# TAB 2: MISTRAL OCR (GIỮ NGUYÊN TÊN FILE GỐC & GOM ẢNH TOÀN DIỆN CHO PANDOC)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -546,7 +546,7 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
-                            # Chuẩn hóa cú pháp đường dẫn ảnh thành tên file thuần túy để Pandoc nhận diện ở thư mục gốc
+                            # Chuẩn hóa cú pháp đường dẫn ảnh thành tên file thuần túy để Pandoc dễ dàng nhận diện ở thư mục gốc
                             page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img_[^)]+?\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
@@ -567,7 +567,7 @@ with tab2:
                                         except: 
                                             pass
 
-                    # 2. QUÉT TOÀN BỘ CÁC THƯ MỤC CON (page-1 đến page-163) ĐỂ GOM TOÀN BỘ ẢNH RA THƯ MỤC GỐC
+                    # 2. QUÉT TOÀN BỘ CÁC THƯ MỤC CON (BẤT KỂ TÊN GÌ / TỪ PAGE-1 ĐẾN PAGE-163) ĐỂ GOM ẢNH RA THƯ MỤC GỐC
                     for item in os.listdir(root_dir):
                         item_path = os.path.join(root_dir, item)
                         if os.path.isdir(item_path):
