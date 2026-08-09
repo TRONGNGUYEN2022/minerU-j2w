@@ -5,6 +5,7 @@ import os
 import re
 import zipfile
 import time
+import shutil
 from bs4 import BeautifulSoup
 import requests
 import streamlit as st
@@ -97,13 +98,22 @@ if "mistral_docx_bytes" not in st.session_state:
 
 
 # --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
-# --- HÀM DỌN SẠCH FILE CŨ TRONG THƯ MỤC GỐC ---
+# --- HÀM DỌN SẠCH TẬP TIN VÀ THƯ MỤC TRANG CŨ TRIỆT ĐỂ ---
 def cleanup_old_temp_files():
     root_dir = "."
-    for f_name in os.listdir(root_dir):
-        if f_name.lower().endswith((".jpeg", ".jpg", ".png", ".docx")) or f_name == "temp_input.md":
+    for item in os.listdir(root_dir):
+        item_path = os.path.join(root_dir, item)
+        # 1. Xóa các file ảnh/doc/markdown tạm ở thư mục gốc
+        if os.path.isfile(item_path):
+            if item.lower().endswith((".jpeg", ".jpg", ".png", ".docx")) or item == "temp_input.md":
+                try:
+                    os.remove(item_path)
+                except:
+                    pass
+        # 2. Xóa sạch toàn bộ các thư mục con phân trang cũ (ví dụ page-1, page-2,...) để tránh sót ảnh cũ
+        elif os.path.isdir(item_path):
             try:
-                os.remove(os.path.join(root_dir, f_name))
+                shutil.rmtree(item_path)
             except:
                 pass
 
@@ -522,11 +532,11 @@ with tab2:
             original_full_name = mistral_file.name
             base_name_only = original_full_name.rsplit('.', 1)[0]
             
-            with st.spinner(f"Đang xử lý file '{original_full_name}', dọn file cũ, gom ảnh và tạo file Word..."):
+            with st.spinner(f"Đang xử lý file '{original_full_name}', dọn file và thư mục cũ, gom ảnh và tạo file Word..."):
                 try:
                     root_dir = "."
                     
-                    # 1. DỌN SẠCH CÁC FILE ẢNH CŨ VÀ FILE TẠM TRONG THƯ MỤC GỐC
+                    # 1. DỌN SẠCH TRIỆT ĐỂ CÁC FILE VÀ THƯ MỤC TRANG CŨ
                     cleanup_old_temp_files()
 
                     client = Mistral(api_key=active_m_key)
@@ -547,7 +557,7 @@ with tab2:
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
                             
-                            # 🛠️ CHUẨN HÓA ĐƯỜNG DẪN ẢNH TỔNG QUÁT (HỖ TRỢ CẢ GẠCH NGANG (-) LẪN GẠCH DƯỚI (_))
+                            # Chuẩn hóa đường dẫn ảnh tổng quát (hỗ trợ cả gạch ngang (-) lẫn gạch dưới (_))
                             page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
@@ -568,7 +578,7 @@ with tab2:
                                         except: 
                                             pass
 
-                    # 2. QUÉT TỔNG QUÁT: Tự động quét toàn bộ thư mục con (bất kể bao nhiêu trang) để gom toàn bộ ảnh ra thư mục gốc
+                    # 2. QUÉT TỔNG QUÁT: Tự động quét toàn bộ thư mục con hiện có để gom toàn bộ ảnh ra thư mục gốc
                     for item in os.listdir(root_dir):
                         item_path = os.path.join(root_dir, item)
                         if os.path.isdir(item_path):
@@ -606,7 +616,7 @@ with tab2:
                     st.session_state.active_file_name = base_name_only
                     
                     if os.path.exists(temp_md_path): os.remove(temp_md_path)
-                    st.success(f"🎉 Xử lý thành công file `{original_full_name}`, đã gom ảnh và tạo file Word chuẩn Pandoc!")
+                    st.success(f"🎉 Xử lý thành công file `{original_full_name}`, đã gom ảnh sạch sẽ và tạo file Word chuẩn Pandoc!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
