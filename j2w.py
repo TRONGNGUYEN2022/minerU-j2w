@@ -489,7 +489,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (TỔNG QUÁT GOM ẢNH & GIỮ TÊN GỐC)
+# TAB 2: MISTRAL OCR (GIỮ TÊN GỐC & GOM ẢNH TOÀN DIỆN TỪ MỌI THƯ MỤC)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -515,7 +515,7 @@ with tab2:
         if not mistral_file:
             st.warning("Vui lòng chọn file!")
         elif not active_m_key:
-            st.error("Nhập Mistral API Key trước khi chạy!")
+            st.error("Vui lòng nhập Mistral API Key!")
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
@@ -567,7 +567,7 @@ with tab2:
                                         except: 
                                             pass
 
-                    # 2. QUÉT TỔNG QUÁT: Tự động quét toàn bộ các thư mục con hiện có (bất kể bao nhiêu trang) để gom ảnh ra thư mục gốc
+                    # 2. QUÉT TOÀN BỘ CÁC THƯ MỤC CON (page-1 đến page-163) ĐỂ GOM TOÀN BỘ ẢNH RA THƯ MỤC GỐC
                     for item in os.listdir(root_dir):
                         item_path = os.path.join(root_dir, item)
                         if os.path.isdir(item_path):
