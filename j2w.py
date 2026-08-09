@@ -479,7 +479,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Khung HTML Fix Triệt Để Toán Học)
+# TAB 2: MISTRAL OCR (API + Pandoc + Xóa ảnh cũ & Ghi đè)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -509,8 +509,17 @@ with tab2:
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
-            with st.spinner("Đang gửi PDF lên Mistral OCR API, bóc tách ảnh và biên dịch file Word..."):
+            with st.spinner("Đang dọn dẹp ảnh cũ, gửi PDF lên Mistral OCR và biên dịch file Word..."):
                 try:
+                    # DỌN SẠCH CÁC FILE ẢNH CŨ VÀ FILE TẠM TRONG THƯ MỤC GỐC
+                    root_dir = "."
+                    for f_name in os.listdir(root_dir):
+                        if f_name.endswith(".jpeg") or f_name.endswith(".png") or f_name.endswith(".jpg") or f_name == "temp_input.md":
+                            try:
+                                os.remove(os.path.join(root_dir, f_name))
+                            except:
+                                pass
+
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
                     base64_file = base64.b64encode(file_bytes).decode('utf-8')
@@ -523,7 +532,6 @@ with tab2:
                     )
                     
                     full_markdown = ""
-                    root_dir = "."
                     images_dict = {}
                     
                     if hasattr(ocr_response, "pages"):
@@ -532,6 +540,7 @@ with tab2:
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                             
+                            # TRÍCH XUẤT VÀ CHÉP ĐÈ TẤT CẢ ẢNH TỪ TẤT CẢ CÁC TRANG RA THƯ MỤC GỐC
                             if hasattr(page, "images") and page.images:
                                 for img in page.images:
                                     if hasattr(img, "id") and hasattr(img, "image_base64") and img.image_base64:
@@ -542,9 +551,11 @@ with tab2:
                                             img_bytes = base64.b64decode(img_b64)
                                             img_filename = f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_bytes
+                                            # Ghi đè trực tiếp vào thư mục gốc
                                             with open(os.path.join(root_dir, img_filename), "wb") as img_f:
                                                 img_f.write(img_bytes)
-                                        except: pass
+                                        except: 
+                                            pass
 
                     # Biên dịch file Word bằng Pandoc
                     temp_md_path = "temp_input.md"
@@ -563,7 +574,7 @@ with tab2:
                     st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
                     
                     if os.path.exists(temp_md_path): os.remove(temp_md_path)
-                    st.success("🎉 Xử lý Mistral OCR và tạo file Word thành công!")
+                    st.success("🎉 Xử lý Mistral OCR, dọn ảnh cũ và tạo file Word thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
