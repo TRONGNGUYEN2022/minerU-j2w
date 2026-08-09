@@ -5,6 +5,7 @@ import os
 import re
 import zipfile
 import time
+import shutil
 import tempfile
 from bs4 import BeautifulSoup
 import requests
@@ -475,7 +476,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Tải Markdown/Ảnh thô + Pandoc Word)
+# TAB 2: MISTRAL OCR (CHUẨN TÊN ẢNH ĐỂ PANDOC NHÚNG VÀO WORD)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -501,12 +502,15 @@ with tab2:
         if not mistral_file:
             st.warning("Vui lòng chọn file!")
         elif not active_m_key:
-            st.error("Vui nhập Mistral API Key!")
+            st.error("Vui lòng nhập Mistral API Key!")
         elif not MISTRAL_AVAILABLE:
             st.error("Chưa cài đặt thư viện `mistralai`.")
         else:
             cleanup_old_temp_files()
-            with st.spinner("Đang gửi PDF lên Mistral OCR API và bóc tách dữ liệu thô..."):
+            original_full_name = mistral_file.name
+            base_name_only = original_full_name.rsplit('.', 1)[0]
+
+            with st.spinner("Đang gửi PDF lên Mistral OCR API và xử lý nhúng ảnh chuẩn Pandoc..."):
                 try:
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
@@ -525,6 +529,7 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
+                            # Chuẩn hóa đường dẫn Markdown để gọi đúng chuẩn tên file ảnh
                             page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
@@ -536,14 +541,14 @@ with tab2:
                                         img_b64 = img.image_base64
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
-                                            clean_id = img_id.replace("_", "-")
                                             img_data_decoded = base64.b64decode(img_b64)
-                                            images_dict[f"{clean_id}.jpeg"] = img_data_decoded
-                                            images_dict[f"{img_id}.jpeg"] = img_data_decoded
+                                            # Đảm bảo tên file sạch sẽ, chuẩn xác đúng một đuôi .jpeg duy nhất tránh lỗi .jpeg.jpeg
+                                            img_filename = img_id if img_id.lower().endswith((".jpeg", ".jpg", ".png")) else f"{img_id}.jpeg"
+                                            images_dict[img_filename] = img_data_decoded
                                         except: 
                                             pass
 
-                    # --- TẠO FILE ZIP CHỨA MARKDOWN VÀ ẢNH ĐỂ TẢI VỀ TRƯỚC KHI PANDOC XỬ LÝ ---
+                    # --- TẠO FILE ZIP THÔ (TÙY CHỌN DỰ PHÒNG CHO NGƯỜI DÙNG) ---
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                         zip_file.writestr("output.md", full_markdown)
@@ -551,9 +556,7 @@ with tab2:
                             zip_file.writestr(f"images/{img_name}", img_bytes)
                     st.session_state.mistral_raw_zip_bytes = zip_buffer.getvalue()
 
-                    st.session_state.debug_images_keys = list(images_dict.keys())
-
-                    # --- XỬ LÝ PANDOC SAU ĐÓ ĐỂ TẠO FILE WORD ---
+                    # --- BIÊN DỊCH WORD BẰNG PANDOC TRONG THƯ MỤC TẠM ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         temp_md_path = os.path.join(tmp_dir, "temp_input.md")
                         with open(temp_md_path, "w", encoding="utf-8") as f:
@@ -572,7 +575,7 @@ with tab2:
                                 "temp_input.md", 
                                 'docx', 
                                 outputfile=output_docx, 
-                                extra_args=['--extract-media=.']
+                                extra_args=['--standalone', '--extract-media=.']
                             )
                             with open(output_docx, "rb") as f:
                                 docx_bytes = f.read()
@@ -582,38 +585,39 @@ with tab2:
 
                     st.session_state.mistral_preview_markdown = full_markdown
                     st.session_state.active_images_dict = images_dict
-                    st.session_state.active_file_name = mistral_file.name.rsplit('.', 1)[0]
+                    st.session_state.active_file_name = base_name_only
                     
-                    st.success("🎉 Xử lý Mistral OCR thành công!")
+                    st.success("🎉 Xử lý Mistral OCR và nhúng ảnh vào Word thành công!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
-
-    # --- HIỂN THỊ NÚT TẢI FILE ZIP THÔ (MARKDOWN + ẢNH) VỀ MÁY ---
-    if st.session_state.get("mistral_raw_zip_bytes"):
-        st.info("📦 Dữ liệu thô từ Mistral (Markdown kèm thư mục ảnh) đã sẵn sàng để tải về máy.")
-        st.download_button(
-            label="📥 Tải file ZIP thô (Markdown + Ảnh) về máy",
-            data=st.session_state.mistral_raw_zip_bytes,
-            file_name=f"{st.session_state.active_file_name}_Mistral_Raw.zip",
-            mime="application/zip",
-            use_container_width=True
-        )
 
     # Hiển thị Khung Preview HTML & Nút Tải Word Chuẩn
     if st.session_state.mistral_preview_markdown:
         st.divider()
         
+        current_file_name = st.session_state.get("active_file_name", "Document")
+        
         col_m1, col_m2 = st.columns([2, 1])
         with col_m1:
-            st.subheader("👁️ Bản xem trước kết quả Mistral OCR")
+            st.subheader(f"👁️ Bản xem trước kết quả: {current_file_name}")
         with col_m2:
             if st.session_state.mistral_docx_bytes:
                 st.download_button(
-                    label="📥 Tải xuống file Word (.docx) chuẩn Pandoc",
+                    label=f"📥 Tải Word chuẩn Pandoc ({current_file_name}.docx)",
                     data=st.session_state.mistral_docx_bytes,
-                    file_name=f"{st.session_state.active_file_name}_Mistral.docx",
+                    file_name=f"{current_file_name}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
+                )
+
+        # --- TÙY CHỌN MỞ RỘNG: TẢI FILE ZIP THÔ ---
+        with st.expander("📦 Tùy chọn nâng cao: Tải gói file ZIP thô (Markdown + Thư mục Ảnh)"):
+            if st.session_state.get("mistral_raw_zip_bytes"):
+                st.download_button(
+                    label="📥 Tải file ZIP thô về máy",
+                    data=st.session_state.mistral_raw_zip_bytes,
+                    file_name=f"{current_file_name}_Mistral_Raw.zip",
+                    mime="application/zip"
                 )
 
         raw_md = st.session_state.mistral_preview_markdown
