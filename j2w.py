@@ -75,17 +75,58 @@ def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
             
     return None
 
-# --- 2. API MINERU ---
+# --- 2. API MINERU & UPLOAD DỰ PHÒNG ---
 
-def upload_temp_file_catbox(uploaded_file):
-    upload_url = "https://catbox.moe/user/api.php"
-    files = {"fileToUpload": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
-    try:
-        res = requests.post(upload_url, data={"reqtype": "fileupload"}, files=files, timeout=60)
-        if res.status_code == 200 and res.text.startswith("http"):
-            return res.text.strip()
-    except Exception as e:
-        st.error(f"Lỗi upload file tạm: {e}")
+def upload_temp_file_robust(uploaded_file):
+    """Hàm upload file tạm thông minh với cơ chế dự phòng nhiều server"""
+    upload_services = [
+        {
+            "name": "Catbox",
+            "url": "https://catbox.moe/user/api.php",
+            "data": {"reqtype": "fileupload"},
+            "file_key": "fileToUpload"
+        },
+        {
+            "name": "Litterbox",
+            "url": "https://litterbox.catbox.moe/resources/api.php",
+            "data": {"reqtype": "fileupload", "time": "24h"},
+            "file_key": "fileToUpload"
+        },
+        {
+            "name": "TmpFiles",
+            "url": "https://tmpfiles.org/api/v1/upload",
+            "data": {},
+            "file_key": "file"
+        }
+    ]
+    
+    file_bytes = uploaded_file.getvalue()
+    file_name = uploaded_file.name
+    file_type = uploaded_file.type
+
+    for service in upload_services:
+        try:
+            files = {service["file_key"]: (file_name, file_bytes, file_type)}
+            res = requests.post(service["url"], data=service["data"], files=files, timeout=30)
+            
+            if res.status_code == 200:
+                result_text = res.text.strip()
+                if service["name"] == "TmpFiles":
+                    try:
+                        res_json = res.json()
+                        if res_json.get("status") == "success":
+                            raw_url = res_json.get("data", {}).get("url", "")
+                            if "tmpfiles.org/" in raw_url and not "tmpfiles.org/dl/" in raw_url:
+                                raw_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                            return raw_url
+                    except:
+                        pass
+                elif result_text.startswith("http"):
+                    return result_text
+        except Exception:
+            continue
+            
+    st.error("Tất cả các server upload tạm đều đang bận hoặc lỗi. Vui lòng thử lại sau ít phút!")
     return None
 
 def start_mineru_task_by_url(api_token, file_url):
@@ -187,7 +228,6 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
                             if table_html:
                                 soup = BeautifulSoup(table_html, "html.parser")
                                 
-                                # Tự động fit theo nội dung (width: auto / max-content) và tô đậm đường viền
                                 for table_tag in soup.find_all("table"):
                                     table_tag['style'] = "border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748;"
                                 for th_tag in soup.find_all("th"):
@@ -276,7 +316,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
 
 # --- 5. GIAO DIỆN CHÍNH ---
 
-st.title("📐 MinerU Math Equation Preview & Pro")
+st.title("📐 Convert PDF/Image to word")
 
 tab1, tab2 = st.tabs(["🚀 Gửi lên MinerU Server (API)", "📁 Tải file layout.json & Ảnh có sẵn (Offline)"])
 
@@ -298,8 +338,8 @@ with tab1:
         if not api_file:
             st.warning("Vui lòng chọn file!")
         else:
-            with st.spinner("Đang tải file lên máy chủ trung gian..."):
-                file_url = upload_temp_file_catbox(api_file)
+            with st.spinner("Đang tải file lên máy chủ trung gian (có dự phòng tự động)..."):
+                file_url = upload_temp_file_robust(api_file)
             if file_url:
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
                     task_id = start_mineru_task_by_url(api_token_input, file_url)
