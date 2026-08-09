@@ -5,7 +5,6 @@ import os
 import re
 import zipfile
 import time
-import shutil
 from bs4 import BeautifulSoup
 import requests
 import streamlit as st
@@ -98,26 +97,6 @@ if "mistral_docx_bytes" not in st.session_state:
 
 
 # --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
-# --- HÀM DỌN SẠCH TẬP TIN VÀ THƯ MỤC TRANG CŨ TRIỆT ĐỂ ---
-def cleanup_old_temp_files():
-    root_dir = "."
-    for item in os.listdir(root_dir):
-        item_path = os.path.join(root_dir, item)
-        # 1. Xóa các file ảnh/doc/markdown tạm ở thư mục gốc
-        if os.path.isfile(item_path):
-            if item.lower().endswith((".jpeg", ".jpg", ".png", ".docx")) or item == "temp_input.md":
-                try:
-                    os.remove(item_path)
-                except:
-                    pass
-        # 2. Xóa sạch toàn bộ các thư mục con phân trang cũ để tránh sót ảnh cũ
-        elif os.path.isdir(item_path):
-            if item != "downloaded_mineru_files":
-                try:
-                    shutil.rmtree(item_path)
-                except:
-                    pass
-
 def clean_and_wrap_latex(latex_str):
     if not latex_str: return ""
     clean_str = latex_str.strip()
@@ -500,7 +479,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (FIX KHỚP TÊN ID ẢNH VỚI MARKDOWN ĐỂ PANDOC NHÚNG THÀNH CÔNG)
+# TAB 2: MISTRAL OCR (GIỮ NGUYÊN TÊN FILE GỐC & FIX CHÈN ẢNH)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -533,12 +512,17 @@ with tab2:
             original_full_name = mistral_file.name
             base_name_only = original_full_name.rsplit('.', 1)[0]
             
-            with st.spinner(f"Đang xử lý file '{original_full_name}', dọn dẹp file cũ, gọi OCR và biên dịch Word..."):
+            with st.spinner(f"Đang xử lý file '{original_full_name}', gom ảnh và tạo file Word..."):
                 try:
                     root_dir = "."
                     
-                    # 1. DỌN SẠCH TRIỆT ĐỂ RÁC TỪ FILE CŨ
-                    cleanup_old_temp_files()
+                    # 1. DỌN SẠCH CÁC FILE ẢNH CŨ VÀ FILE TẠM TRONG THƯ MỤC GỐC
+                    for f_name in os.listdir(root_dir):
+                        if f_name.lower().endswith((".jpeg", ".jpg", ".png", ".docx")) or f_name == "temp_input.md":
+                            try:
+                                os.remove(os.path.join(root_dir, f_name))
+                            except:
+                                pass
 
                     client = Mistral(api_key=active_m_key)
                     file_bytes = mistral_file.getvalue()
@@ -557,10 +541,7 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
-                            
-                            # Xử lý chuẩn hóa đường dẫn trong Markdown để khớp với id ảnh của Mistral
-                            page_md = re.sub(r'!\[(.*?)\]\([^)]*?([^/]*?img[_-][a-zA-Z0-9_-]+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
-                            
+                            page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img_[^)]+?\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
                             
@@ -572,7 +553,6 @@ with tab2:
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
                                             img_bytes = base64.b64decode(img_b64)
-                                            # Đặt tên file vật lý tại thư mục gốc TRÙNG KHỚP 100% với img.id từ server trả về
                                             img_filename = f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_bytes
                                             with open(os.path.join(root_dir, img_filename), "wb") as img_f:
@@ -580,7 +560,21 @@ with tab2:
                                         except: 
                                             pass
 
-                    # 2. BIÊN DỊCH FILE WORD BẰNG PANDOC VỚI THAM SỐ --resource-path
+                    # 2. QUÉT THÊM CÁC THƯ MỤC CON page-* ĐỂ ĐẢM BẢO KHÔNG SÓT ẢNH
+                    for item in os.listdir(root_dir):
+                        item_path = os.path.join(root_dir, item)
+                        if os.path.isdir(item_path) and item.startswith("page-"):
+                            for sub_f in os.listdir(item_path):
+                                if sub_f.lower().endswith((".jpeg", ".jpg", ".png")):
+                                    src_img = os.path.join(item_path, sub_f)
+                                    dst_img = os.path.join(root_dir, sub_f)
+                                    try:
+                                        with open(src_img, "rb") as sf, open(dst_img, "wb") as df:
+                                            df.write(sf.read())
+                                    except:
+                                        pass
+
+                    # Biên dịch file Word bằng Pandoc giữ đúng tên gốc
                     temp_md_path = "temp_input.md"
                     with open(temp_md_path, "w", encoding="utf-8") as f:
                         f.write(full_markdown)
@@ -602,7 +596,7 @@ with tab2:
                     st.session_state.active_file_name = base_name_only
                     
                     if os.path.exists(temp_md_path): os.remove(temp_md_path)
-                    st.success(f"🎉 Xử lý thành công file `{original_full_name}`, ảnh đã được nhúng thẳng vào file Word!")
+                    st.success(f"🎉 Xử lý thành công file `{original_full_name}`!")
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
