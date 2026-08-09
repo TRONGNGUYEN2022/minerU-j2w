@@ -473,7 +473,7 @@ with tab1:
 
 
 # ==========================================
-# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh & Debug View Cố Định)
+# TAB 2: MISTRAL OCR (API + Pandoc + Fix Chèn Ảnh & Debug View)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -579,7 +579,7 @@ with tab2:
                 except Exception as e:
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # --- KHU VỰC HIỂN THỊ CỐ ĐỊNH TÊN FILE ẢNH DEBUG ---
+    # --- HIỂN THỊ CỐ ĐỊNH DANH SẢN DEBUG TÊN FILE ẢNH ---
     if "debug_images_keys" in st.session_state and st.session_state.debug_images_keys:
         st.info(f"🔍 **Thông tin Debug từ Mistral OCR:** Bóc tách được {len(st.session_state.debug_images_keys)} định danh ảnh.")
         st.write("Danh sách tên file ảnh:", st.session_state.debug_images_keys)
