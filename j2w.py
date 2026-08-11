@@ -840,3 +840,14 @@ if st.session_state.active_json is not None:
         st.session_state.active_images_dict,
         file_name=st.session_state.active_file_name
     )
+    with st.expander("🛠️ Xem Nhật ký hệ thống (System Logs)"):
+    if os.path.exists("logs/app.log"):
+        with open("logs/app.log", "r", encoding="utf-8") as log_file:
+            log_content = log_file.read()
+        st.text_area("Nội dung file app.log", log_content, height=300)
+        if st.button("Xóa lịch sử log"):
+            open("logs/app.log", "w", encoding="utf-8").close()
+            st.success("Đã làm sạch file log!")
+            st.rerun()
+    else:
+        st.info("Chưa có file log nào được tạo. Hãy thử thực hiện một tác vụ (như upload file) để sinh log.")
