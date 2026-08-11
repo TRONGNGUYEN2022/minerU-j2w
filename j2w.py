@@ -72,14 +72,18 @@ def save_config(gemini_key, mistral_key, mineru_key):
     except:
         pass
 
+# Đọc cấu hình đã lưu trên server (nếu có)
 saved_config = load_saved_config()
+
 DEFAULT_MINERU_KEY = saved_config.get("mineru_key", "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O")
 DEFAULT_GEMINI_KEY = saved_config.get("gemini_key", "AQ.Ab8RN6IiVh_ufztKik5rSMrl39c-U6_L6v5oy_Qru1-YNUBdRg")
 DEFAULT_MISTRAL_KEY = saved_config.get("mistral_key", "Asht2uDLjH8WTWnU06dBWdPbpcVQrbt5")
 
-st.set_page_config(page_title="RPG Spiritual Document Converter", page_icon="⚔️", layout="wide")
+# --- CẤU HÌNH GIAO DIỆN ---
+st.set_page_config(page_title="Convert PDF/Image to word (MinerU - Mistral - Gemini)", page_icon="📐", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
 
+# Tạo thư mục mặc định để lưu file tải về
 DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
 os.makedirs(DEFAULT_DOWNLOAD_DIR, exist_ok=True)
 os.makedirs(os.path.join(DEFAULT_DOWNLOAD_DIR, "images"), exist_ok=True)
@@ -99,10 +103,7 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "Document"
 
-# Trạng thái game RPG
-if "spiritual_journey_started" not in st.session_state:
-    st.session_state.spiritual_journey_started = False
-
+# Lưu trữ Key vào Session State
 if "saved_gemini_key" not in st.session_state:
     st.session_state.saved_gemini_key = DEFAULT_GEMINI_KEY
 if "saved_mistral_key" not in st.session_state:
@@ -110,6 +111,7 @@ if "saved_mistral_key" not in st.session_state:
 if "saved_mineru_key" not in st.session_state:
     st.session_state.saved_mineru_key = DEFAULT_MINERU_KEY
 
+# Biến riêng cho Mistral OCR
 if "mistral_preview_markdown" not in st.session_state:
     st.session_state.mistral_preview_markdown = ""
 if "mistral_docx_bytes" not in st.session_state:
@@ -118,6 +120,7 @@ if "mistral_raw_zip_bytes" not in st.session_state:
     st.session_state.mistral_raw_zip_bytes = None
 
 
+# --- 1. CÁC HÀM XỬ LÝ DÙNG CHUNG ---
 def cleanup_old_temp_files():
     root_dir = "."
     for f_name in os.listdir(root_dir):
@@ -152,24 +155,45 @@ def extract_zip_and_get_data(zip_bytes):
 def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
     if not img_path_str: return None
     clean_name = os.path.basename(img_path_str)
+    
     if images_dict and clean_name in images_dict:
         return io.BytesIO(images_dict[clean_name])
+        
+    local_img_path = os.path.join("images", clean_name)
+    if os.path.exists(local_img_path):
+        with open(local_img_path, "rb") as f:
+            return io.BytesIO(f.read())
+            
+    if json_upload_dir:
+        auto_path = os.path.join(json_upload_dir, "images", clean_name)
+        if os.path.exists(auto_path):
+            with open(auto_path, "rb") as f:
+                return io.BytesIO(f.read())
+                
+    if os.path.exists(clean_name):
+        with open(clean_name, "rb") as f:
+            return io.BytesIO(f.read())
+            
     return None
 
+# --- 2. API MINERU & UPLOAD DỰ PHÒNG ---
 def upload_temp_file_robust(uploaded_file):
     upload_services = [
         {"name": "Catbox", "url": "https://catbox.moe/user/api.php", "data": {"reqtype": "fileupload"}, "file_key": "fileToUpload"},
         {"name": "Litterbox", "url": "https://litterbox.catbox.moe/resources/api.php", "data": {"reqtype": "fileupload", "time": "24h"}, "file_key": "fileToUpload"},
         {"name": "TmpFiles", "url": "https://tmpfiles.org/api/v1/upload", "data": {}, "file_key": "file"}
     ]
+    
     file_bytes = uploaded_file.getvalue()
     file_name = uploaded_file.name
     file_type = uploaded_file.type
 
     for service in upload_services:
         try:
+            log_info(f"Đang thử upload file qua dịch vụ trung gian: {service['name']}")
             files = {service["file_key"]: (file_name, file_bytes, file_type)}
             res = requests.post(service["url"], data=service["data"], files=files, timeout=30)
+            
             if res.status_code == 200:
                 result_text = res.text.strip()
                 if service["name"] == "TmpFiles":
@@ -179,26 +203,39 @@ def upload_temp_file_robust(uploaded_file):
                             raw_url = res_json.get("data", {}).get("url", "")
                             if "tmpfiles.org/" in raw_url and not "tmpfiles.org/dl/" in raw_url:
                                 raw_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                            log_info(f"Upload thành công qua TmpFiles: {raw_url}")
                             return raw_url
                     except:
                         pass
                 elif result_text.startswith("http"):
+                    log_info(f"Upload thành công qua {service['name']}: {result_text}")
                     return result_text
-        except Exception:
+        except Exception as e:
+            log_error(f"Lỗi khi upload qua {service['name']}: {str(e)}")
             continue
+    log_error("Tất cả các dịch vụ upload trung gian đều thất bại.")
     return None
 
 def start_mineru_task_by_url(api_token, file_url):
     url = f"{MINERU_BASE_URL}/api/v4/extract/task"
     headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
     payload = {"url": file_url, "model_version": "vlm", "is_ocr": True}
+    
     try:
+        log_info(f"Đang gửi request tạo task MinerU cho URL: {file_url}")
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         if response.status_code == 200:
             res_json = response.json()
             if res_json.get("code") == 0:
-                return res_json.get("data", {}).get("task_id")
-    except: pass
+                task_id = res_json.get("data", {}).get("task_id")
+                log_info(f"Tạo task MinerU thành công. Task ID: {task_id}")
+                return task_id
+            else:
+                log_error(f"MinerU trả về mã lỗi code != 0: {res_json}")
+        else:
+            log_error(f"MinerU API Error: Status {response.status_code} - {response.text}")
+    except Exception as e:
+        log_error(f"Lỗi kết nối khi gọi MinerU API: {str(e)}")
     return None
 
 def check_task_status_v4(api_token, task_id):
@@ -207,187 +244,179 @@ def check_task_status_v4(api_token, task_id):
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
-            return response.json().get("data", {})
-    except: pass
+            res_json = response.json()
+            return res_json.get("data", {})
+        else:
+            log_error(f"Kiểm tra status task {task_id} lỗi: Status {response.status_code}")
+    except Exception as e:
+        log_error(f"Exception khi check task status {task_id}: {str(e)}")
     return {}
 
 def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
-    if not GEMINI_AVAILABLE: return None, {}
+    if not GEMINI_AVAILABLE:
+        log_error("Thư viện google-genai chưa được cài đặt.")
+        st.error("Chưa cài đặt thư viện `google-genai`.")
+        return None, {}
+    
     try:
+        log_info(f"Đang kích hoạt fallback bằng model Gemini: {selected_model}")
         client = genai.Client(api_key=gemini_api_key)
         file_bytes = uploaded_file.getvalue()
         mime_type = uploaded_file.type
-        prompt = "Bạn là chuyên gia OCR tài liệu toán học. Hãy đọc chính xác, toán học đặt trong $...$ hoặc $$...$$. Trình bày bằng HTML sạch sẽ dùng thẻ <p>, <h3>, bảng dùng <table>."
+        
+        prompt = (
+            "Bạn là chuyên gia OCR và chuyển đổi tài liệu toán học. Hãy đọc tài liệu này chính xác tuyệt đối. "
+            "Tất cả các biểu thức toán học BẮT BUỘC phải được đặt trong cặp dấu đô la ($...$ cho inline hoặc $$...$$ cho block). "
+            "Trình bày kết quả bằng HTML sạch sẽ dùng thẻ <p>, <h3>, bảng dùng <table> có viền rõ ràng. Chỉ trả về HTML hoàn chỉnh."
+        )
+
         response = client.models.generate_content(
             model=selected_model,
             contents=[types.Part.from_bytes(data=file_bytes, mime_type=mime_type), prompt]
         )
-        html_content = re.sub(r"^```html\s*", "", response.text, flags=re.IGNORECASE)
+        
+        html_content = response.text
+        html_content = re.sub(r"^```html\s*", "", html_content, flags=re.IGNORECASE)
         html_content = re.sub(r"\s*```$", "", html_content)
-        return {"pdf_info": [{"para_blocks": [{"type": "text", "lines": [{"spans": [{"type": "text", "content": html_content}]}]}]}]}, {}
-    except:
+
+        simulated_json = {
+            "pdf_info": [{
+                "para_blocks": [{
+                    "type": "text",
+                    "lines": [{"spans": [{"type": "text", "content": html_content}]}]
+                }]
+            }]
+        }
+        log_info("Fallback Gemini xử lý thành công.")
+        return simulated_json, {}
+    except Exception as e:
+        log_error(f"Lỗi khi xử lý fallback bằng Gemini: {str(e)}")
+        st.error(f"Lỗi khi xử lý bằng Gemini: {e}")
         return None, {}
+
+def collect_image_paths_from_block(block):
+    paths = []
+    for key in ["image_path", "img_path", "path", "src"]:
+        val = block.get(key)
+        if val: paths.append(val)
+        
+    for sub_b in block.get("blocks", []):
+        if isinstance(sub_b, dict):
+            paths.extend(collect_image_paths_from_block(sub_b))
+            
+    for line in block.get("lines", []):
+        if isinstance(line, dict):
+            for span in line.get("spans", []):
+                if isinstance(span, dict):
+                    for key in ["image_path", "img_path", "path", "src"]:
+                        val = span.get(key)
+                        if val: paths.append(val)
+    return paths
 
 def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
-    pages = json_data if isinstance(json_data, list) else json_data.get("pdf_info", [])
+    
+    pages = []
+    if isinstance(json_data, list): pages = json_data
+    elif isinstance(json_data, dict):
+        pages = json_data.get("pdf_info", [])
+        if not pages and "para_blocks" in json_data: pages = [json_data]
+
     for page in pages:
         if not isinstance(page, dict): continue
-        for block in page.get("para_blocks", page.get("blocks", [])):
+        blocks = page.get("para_blocks", page.get("blocks", []))
+        for block in blocks:
             if not isinstance(block, dict): continue
             b_type = block.get("type")
+            
             if b_type in ["text", "title", "paragraph", "header", "footer"]:
                 p_text = ""
                 for line in block.get("lines", []):
                     for span in line.get("spans", []):
+                        span_type = span.get("type")
                         content = span.get("content", span.get("text", ""))
-                        p_text += clean_and_wrap_latex(content) if span.get("type") in ["inline_equation", "equation", "math"] else content
+                        if span_type == "text" or not span_type:
+                            if re.match(r"^Bài\s+\d+", content.strip()):
+                                p_text += f"<b>{content}</b>"
+                            else:
+                                p_text += content
+                        elif span_type in ["inline_equation", "equation", "math"]:
+                            p_text += f" {clean_and_wrap_latex(content)} "
                 if p_text.strip():
-                    preview_inner_html += f"<p style='margin-bottom: 10px;'>{p_text}</p>"
+                    if "HƯỚNG DẪN CHẤM" in p_text or "Đáp án" in p_text:
+                        preview_inner_html += f"<h3 style='color: #2b6cb0; margin-top: 20px;'>{p_text}</h3>"
+                    else:
+                        preview_inner_html += f"<p style='margin-bottom: 10px;'>{p_text}</p>"
+
+            elif b_type in ["image", "chart", "figure"]:
+                all_img_paths = collect_image_paths_from_block(block)
+                for img_path_str in set(all_img_paths):
+                    img_stream = get_image_bytes(img_path_str, images_dict, json_upload_dir)
+                    if img_stream:
+                        encoded = base64.b64encode(img_stream.getvalue()).decode("utf-8")
+                        preview_inner_html += f'<div style="text-align: center; margin: 20px 0;"><img src="data:image/png;base64,{encoded}" style="max-width: 450px; border-radius: 8px; border: 1px solid #2d3748;" /></div>'
+
+            elif b_type == "table":
+                for sub_b in block.get("blocks", [block]):
+                    for line in sub_b.get("lines", []):
+                        for span in line.get("spans", []):
+                            table_html = span.get("html", span.get("table_html", ""))
+                            if table_html:
+                                soup = BeautifulSoup(table_html, "html.parser")
+                                for table_tag in soup.find_all("table"):
+                                    table_tag['style'] = "border-collapse: collapse; width: auto; max-width: 100%; margin: 15px auto; border: 2px solid #2d3748;"
+                                for th_tag in soup.find_all("th"):
+                                    th_tag['style'] = "border: 2px solid #2d3748; padding: 6px 10px; background-color: #edf2f7; font-weight: bold; text-align: center;"
+                                for td_tag in soup.find_all("td"):
+                                    td_tag['style'] = "border: 2px solid #2d3748; padding: 6px 10px; vertical-align: middle;"
+                                for eq_tag in soup.find_all("eq"):
+                                    eq_tag.string = clean_and_wrap_latex(eq_tag.get_text())
+                                preview_inner_html += f"<div style='margin: 15px 0; overflow-x: auto;'>{str(soup)}</div>"
+
     preview_inner_html += '</div>'
-    st.markdown("### 👁️ Bản xem trước Nội dung")
-    components.html(f'<div style="padding:20px; background:#fff; border:1px solid #ccc; max-height:500px; overflow-y:auto;">{preview_inner_html}</div>', height=550)
-
-
-# ==========================================
-# MÀN HÌNH GAME NHẬP VAI TÂM LINH (CÓ ÂM THANH CHUÔNG & TIẾNG CHIM HÓT)
-# ==========================================
-if not st.session_state.spiritual_journey_started:
     
-    # Nhúng giao diện game RPG kết hợp âm thanh tự động
-    rpg_audio_component = """
+    copier_component = f"""
     <!DOCTYPE html>
-    <html lang="vi">
+    <html>
     <head>
-        <meta charset="UTF-8">
+        <meta charset="utf-8">
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+        <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {{delimiters: [{{left: '$', right: '$', display: false}}]}});"></script>
         <style>
-            .rpg-box {
-                background: linear-gradient(135deg, #1e1b4b, #0f172a);
-                border: 2px solid #f59e0b;
-                border-radius: 12px;
-                padding: 25px;
-                color: #f3f4f6;
-                box-shadow: 0 10px 30px rgba(0,0,0,0.8);
-                font-family: sans-serif;
-                text-align: center;
-            }
-            .rpg-title {
-                color: #fbbf24;
-                font-size: 24px;
-                font-weight: bold;
-                margin-bottom: 8px;
-                text-transform: uppercase;
-                letter-spacing: 1px;
-            }
-            .rpg-dialogue {
-                background: rgba(15, 23, 42, 0.95);
-                border-left: 5px solid #f59e0b;
-                padding: 15px 20px;
-                border-radius: 8px;
-                margin: 15px 0;
-                font-size: 15px;
-                line-height: 1.6;
-                color: #e2e8f0;
-                text-align: left;
-            }
-            .audio-panel {
-                margin-top: 15px;
-                display: flex;
-                justify-content: center;
-                gap: 10px;
-            }
-            button.rpg-btn {
-                background: #0d9488;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 6px;
-                cursor: pointer;
-                font-weight: bold;
-                font-size: 13px;
-                transition: 0.3s;
-            }
-            button.rpg-btn:hover { background: #0f766e; }
-            button.stop-btn { background: #b91c1c; }
-            button.stop-btn:hover { background: #991b1b; }
+            body {{ font-family: Arial, sans-serif; padding: 10px; background-color: #ffffff; }}
+            .btn-action {{ padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; margin-right: 10px; margin-bottom: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+            .btn-copy {{ background-color: #2b6cb0; }}
+            .preview-card {{ background-color: #ffffff; padding: 30px; border-radius: 10px; border: 1px solid #cbd5e0; max-height: 600px; overflow-y: auto; }}
         </style>
     </head>
     <body>
-        <div class="rpg-box">
-            <div class="rpg-title">⚔️ Lữ Trình Tâm Linh: Cổng Khai Sáng Tri Thức ⚔️</div>
-            <div style="color: #94a3b8; font-style: italic; font-size: 13px;">Chương I: Tiếng Chuông Ngân & Sự Tỉnh Thức Giữa Vô Thường</div>
-            
-            <div class="rpg-dialogue">
-                <b>📜 Hiền Giả (Thiền Sư / Đức Cha):</b><br>
-                <i>"Chào lữ khách phương xa! Hãy lắng nghe tiếng chuông đồng vọng và tiếng chim hót thanh bình để trút bỏ mọi muộn phiền văn bản. Hãy chọn thánh địa và thắp nén tâm hương để mở khóa cánh cổng chính..."</i>
-            </div>
-
-            <!-- Phát âm thanh tiếng chim hót & thiên nhiên ngầm -->
-            <audio autoplay loop id="rpg-nature-audio">
-                <source src="https://actions.google.com/sounds/v1/ambiences/morning_birds.ogg" type="audio/ogg">
-            </audio>
-
-            <div class="audio-panel">
-                <button class="rpg-btn" onclick="document.getElementById('rpg-nature-audio').play()">🔊 Bật Âm Thanh Chim Hót & Chuông</button>
-                <button class="rpg-btn stop-btn" onclick="document.getElementById('rpg-nature-audio').pause()">🔇 Tắt Âm Thanh</button>
-            </div>
+        <div>
+            <button class="btn-action btn-copy" onclick="copyContentToClipboard()">📋 Sao chép nhanh (Dán vào Word)</button>
+            <span id="status-msg" style="margin-left: 10px; color: #2f855a; font-weight: bold; display: none;">✔ Thành công!</span>
         </div>
+        <div class="preview-card" id="preview-box">{preview_inner_html}</div>
+        <script>
+        function copyContentToClipboard() {{
+            const range = document.createRange();
+            range.selectNode(document.getElementById('content-to-copy'));
+            window.getSelection().removeAllRanges();
+            window.getSelection().addRange(range);
+            try {{ document.execCommand('copy'); }} catch (err) {{}}
+            window.getSelection().removeAllRanges();
+            const status = document.getElementById('status-msg');
+            status.innerText = "✔ Đã sao chép!";
+            status.style.display = 'inline';
+            setTimeout(() => {{ status.style.display = 'none'; }}, 3000);
+        }}
+        </script>
     </body>
     </html>
     """
-    components.html(rpg_audio_component, height=270)
+    st.markdown("### 👁️ Bản xem trước Nội dung MinerU / Gemini")
+    components.html(copier_component, height=750, scrolling=False)
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    col_rpg1, col_rpg2 = st.columns(2)
-    with col_rpg1:
-        st.markdown("### 🛡️ Lựa Chọn Tông Tôn / Môn Phái")
-        realm_choice = st.selectbox(
-            "Chọn không gian thánh địa khởi đầu:",
-            [
-                "🏛️ Cổ Tự Thiền Môn (Sư Tôn dẫn dắt, tiếng chuông đồng vọng)",
-                "⛪ Thánh Đường Ánh Sáng (Đức Cha dẫn dắt, ánh hào quang kính màu)",
-                "🌿 Thâm Sơn Cốc Ẩn (Đạo sĩ hòa mình cùng thiên nhiên cỏ cây)"
-            ]
-        )
-        
-        class_choice = st.selectbox(
-            "Chọn Class Nhân Vật Của Bạn:",
-            [
-                "🧘 Hành Giả Tĩnh Lặng (Buff độ tập trung cao độ)",
-                "📚 Học Giả Thông Thái (Tăng tốc độ giải mã văn bản)",
-                "⚔️ Hiệp Sĩ Thiện Nguyện (Chuyên gieo hạt phước báu tích cực)"
-            ]
-        )
-
-    with col_rpg2:
-        st.markdown("### 🕯️ Nghi Thức Khấn Nguyện (Quest Oath)")
-        player_oath = st.text_area(
-            "Viết lời thề / Câu niệm phật / Tâm nguyện hôm nay của bạn:",
-            placeholder="Ví dụ: Nam Mô Bản Sư Thích Ca Mâu Ní Phật / Amen / Hôm nay ta quyết tâm hoàn thành trọn vẹn văn bản này..."
-        )
-        
-        accept_quest = st.checkbox("⚡ Ta đã sẵn sàng chấp nhận thử thách và cam kết hành động thiện lương.")
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
-    with col_b2:
-        if accept_quest:
-            if st.button("🔮 KHAI MỞ CỔNG TRI THỨC (START GAME)", use_container_width=True):
-                st.session_state.spiritual_journey_started = True
-                log_info(f"Người chơi chọn Thánh Địa: {realm_choice} | Class: {class_choice} | Tâm nguyện: {player_oath}")
-                st.success("🎉 Nghi thức thành công! Năng lượng phước báu đã được kích hoạt. Đang dịch chuyển vào thế giới chính...")
-                st.rerun()
-        else:
-            st.warning("🔒 Bạn cần hoàn thành lời thề và tích chọn ô xác nhận để mở khóa cửa ải!")
-
-    st.stop()
-
-
-# ==========================================
-# 5. GIAO DIỆN CHÍNH (3 TABS)
-# ==========================================
+# --- 5. GIAO DIỆN CHÍNH (3 TABS) ---
 st.title("📐 Convert PDF/Image to word (MinerU - Mistral - Gemini)")
 
 tab1, tab2, tab4 = st.tabs([
@@ -630,36 +659,42 @@ with tab2:
         
         st.subheader(f"👁️ Bản xem trước kết quả: {current_file_name}")
 
-        # --- NÚT TẢI WORD LUÔN HIỂN THỊ ---
-        if st.session_state.mistral_docx_bytes:
-            st.download_button(
-                label=f"📥 Tải xuống file Word chuẩn Pandoc ({current_file_name}.docx)",
-                data=st.session_state.mistral_docx_bytes,
-                file_name=f"{current_file_name}.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
-        else:
-            st.warning("Chưa có dữ liệu file Word để tải.")
-
         # --- TÍNH NĂNG CỔNG THANH TOÁN TÂM LINH & NĂNG LƯỢNG TÍCH CỰC ---
-        with st.expander("🌟 Gieo hạt phước báu & Lan tỏa năng lượng tích cực (Tùy tâm)"):
-            st.info("Ứng dụng hoàn toàn miễn phí! Bạn có thể hoan hỷ chia sẻ một chút năng lượng tích cực bằng cách chọn hoặc tự viết một câu niệm, lời cầu nguyện hoặc việc tốt.")
-            faith_choice = st.selectbox(
-                "Bạn muốn gửi gắm năng lượng tích cực theo hình thức nào?",
-                [
-                    "🙏 Niệm Phật / Bồ Tát (Nam Mô A Di Đà Phật, Quan Thế Âm...)",
-                    "✝️ Cầu nguyện theo Đức Chúa Trời / Thiên Chúa",
-                    "📿 Lời khấn nguyện / Niệm thần thánh theo tôn giáo của tôi",
-                    "🌿 Cam kết làm một việc tốt / Giúp ích cho đời trong hôm nay"
-                ]
-            )
-            user_custom_prayer = st.text_area(
-                "Viết câu niệm, lời khấn nguyện hoặc việc tốt của bạn vào đây:",
-                placeholder="Ví dụ: Nam Mô Bản Sư Thích Ca Mâu Ni Phật / Amen / Hôm nay tôi sẽ giúp đỡ một người khó khăn..."
-            )
-            if st.button("✨ Gửi gắm phước báu & Nhận niệm lành"):
-                st.success("🙏 Cảm ơn bạn rất nhiều vì đã gieo nhân duyên lành! Chúc bạn và gia đình một ngày ngập tràn bình an, may mắn và vạn sự hanh thông.")
+        st.markdown("---")
+        st.subheader("🌟 Gieo hạt phước báu & Lan tỏa năng lượng tích cực")
+        st.info("Ứng dụng hoàn toàn miễn phí! Để nhận file Word, bạn hãy hoan hỷ chia sẻ một chút năng lượng tích cực bằng cách chọn hoặc tự viết một câu niệm, lời cầu nguyện hoặc một việc tốt bạn sẽ làm nhé.")
+        
+        faith_choice = st.selectbox(
+            "Bạn muốn gửi gắm năng lượng tích cực theo hình thức nào?",
+            [
+                "🙏 Niệm Phật / Bồ Tát (Nam Mô A Di Đà Phật, Quan Thế Âm...)",
+                "✝️ Cầu nguyện theo Đức Chúa Trời / Thiên Chúa",
+                "📿 Lời khấn nguyện / Niệm thần thánh theo tôn giáo của tôi",
+                "🌿 Cam kết làm một việc tốt / Giúp ích cho đời trong hôm nay"
+            ]
+        )
+        
+        user_custom_prayer = st.text_area(
+            "Viết câu niệm, lời khấn nguyện hoặc việc tốt của bạn vào đây:",
+            placeholder="Ví dụ: Nam Mô Bản Sư Thích Ca Mâu Ni Phật / Amen / Hôm nay tôi sẽ giúp đỡ một người khó khăn..."
+        )
+        
+        confirmed_positive_action = st.checkbox("✨ Tôi đã thành tâm thực hiện / viết ra điều trên và xin nhận file tài liệu.")
+        
+        if confirmed_positive_action:
+            if st.session_state.mistral_docx_bytes:
+                st.download_button(
+                    label=f"📥 Tải xuống file Word ngay ({current_file_name}.docx)",
+                    data=st.session_state.mistral_docx_bytes,
+                    file_name=f"{current_file_name}.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True
+                )
+                st.success("🙏 Cảm ơn bạn đã gieo nhân duyên lành! Chúc bạn một ngày ngập tràn bình an và năng lượng tích cực.")
+            else:
+                st.warning("Chưa có dữ liệu file Word để tải.")
+        else:
+            st.markdown("🔒 *Vui lòng chọn hình thức, viết chia sẻ và tích chọn ô xác nhận ở trên để mở khóa nút tải file Word.*")
 
         with st.expander("📦 Tùy chọn nâng cao: Tải gói file ZIP thô (Markdown + Thư mục Ảnh)"):
             if st.session_state.get("mistral_raw_zip_bytes"):
