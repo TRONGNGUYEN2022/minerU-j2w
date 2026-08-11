@@ -103,6 +103,10 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "Document"
 
+# Khởi tạo trạng thái màn hình nhập vai tâm linh
+if "spiritual_journey_started" not in st.session_state:
+    st.session_state.spiritual_journey_started = False
+
 # Lưu trữ Key vào Session State
 if "saved_gemini_key" not in st.session_state:
     st.session_state.saved_gemini_key = DEFAULT_GEMINI_KEY
@@ -416,7 +420,65 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     st.markdown("### 👁️ Bản xem trước Nội dung MinerU / Gemini")
     components.html(copier_component, height=750, scrolling=False)
 
-# --- 5. GIAO DIỆN CHÍNH (3 TABS) ---
+
+# ==========================================
+# GIAO DIỆN MÀN HÌNH CHÀO NHẬP VAI TÂM LINH
+# ==========================================
+if not st.session_state.spiritual_journey_started:
+    st.markdown("<h1 style='text-align: center; color: #d69e2e;'>⛩️ Điện Tịnh Tâm & Hành Trình Tri Thức</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: #4a5568; font-size: 18px;'>Chào mừng lữ khách đến với không gian chuyển hóa tài liệu và gieo hạt phước báu.</p>", unsafe_allow_html=True)
+    
+    st.divider()
+    
+    col_intro1, col_intro2 = st.columns(2)
+    with col_intro1:
+        st.subheader("1. Chọn không gian tâm linh của bạn")
+        space_choice = st.selectbox(
+            "Chọn nơi bạn muốn dừng chân:",
+            [
+                "🏛️ Cổ tự thanh tịnh (Tiếng chuông ngân, khói trầm lan tỏa)",
+                "⛪ Thánh đường cổ kính (Ánh nắng xuyên qua kính màu, sự bình an)",
+                "🌿 Khu vườn tĩnh lặng (Thiên nhiên hòa quyện, tâm hồn rộng mở)"
+            ]
+        )
+        
+        avatar_choice = st.selectbox(
+            "Chọn nhân vật đại diện cho chuyến đi:",
+            [
+                "🧘 Lữ khách tìm kiếm sự bình an",
+                "📚 Người hành hương mang khát vọng tri thức",
+                "✨ Tâm hồn hướng thiện, gieo hạt việc tốt"
+            ]
+        )
+
+    with col_intro2:
+        st.subheader("2. Gửi gắm tâm nguyện / Câu niệm lành")
+        user_intro_prayer = st.text_area(
+            "Thắp một nén tâm hương ý niệm (Niệm Phật, Cầu nguyện, hay cam kết việc tốt):",
+            placeholder="Ví dụ: Nam Mô Quan Thế Âm Bồ Tát / Amen / Hôm nay tôi sẽ hoàn thành tốt công việc và giúp đỡ mọi người..."
+        )
+        
+        accept_journey = st.checkbox("✨ Tôi đã thành tâm tĩnh lòng và sẵn sàng bước vào hành trình.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    
+    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
+    with col_btn2:
+        if accept_journey:
+            if st.button("🚀 Bước vào Cổng Tri Thức & Mở Khóa Công Cụ", use_container_width=True):
+                st.session_state.spiritual_journey_started = True
+                log_info(f"Lữ khách đã bắt đầu hành trình với không gian: {space_choice} và nhân vật: {avatar_choice}")
+                st.success("🙏 Hành trình đã bắt đầu! Chúc bạn gặt hái được nhiều kết quả tốt đẹp.")
+                st.rerun()
+        else:
+            st.markdown("<p style='text-align: center; color: #e53e3e;'>🔒 <i>Vui lòng tích chọn ô xác nhận tĩnh lòng ở trên để mở khóa cánh cổng.</i></p>", unsafe_allow_html=True)
+
+    st.stop()
+
+
+# ==========================================
+# 5. GIAO DIỆN CHÍNH (3 TABS)
+# ==========================================
 st.title("📐 Convert PDF/Image to word (MinerU - Mistral - Gemini)")
 
 tab1, tab2, tab4 = st.tabs([
@@ -659,42 +721,36 @@ with tab2:
         
         st.subheader(f"👁️ Bản xem trước kết quả: {current_file_name}")
 
-        # --- TÍNH NĂNG CỔNG THANH TOÁN TÂM LINH & NĂNG LƯỢNG TÍCH CỰC ---
-        st.markdown("---")
-        st.subheader("🌟 Gieo hạt phước báu & Lan tỏa năng lượng tích cực")
-        st.info("Ứng dụng hoàn toàn miễn phí! Để nhận file Word, bạn hãy hoan hỷ chia sẻ một chút năng lượng tích cực bằng cách chọn hoặc tự viết một câu niệm, lời cầu nguyện hoặc một việc tốt bạn sẽ làm nhé.")
-        
-        faith_choice = st.selectbox(
-            "Bạn muốn gửi gắm năng lượng tích cực theo hình thức nào?",
-            [
-                "🙏 Niệm Phật / Bồ Tát (Nam Mô A Di Đà Phật, Quan Thế Âm...)",
-                "✝️ Cầu nguyện theo Đức Chúa Trời / Thiên Chúa",
-                "📿 Lời khấn nguyện / Niệm thần thánh theo tôn giáo của tôi",
-                "🌿 Cam kết làm một việc tốt / Giúp ích cho đời trong hôm nay"
-            ]
-        )
-        
-        user_custom_prayer = st.text_area(
-            "Viết câu niệm, lời khấn nguyện hoặc việc tốt của bạn vào đây:",
-            placeholder="Ví dụ: Nam Mô Bản Sư Thích Ca Mâu Ni Phật / Amen / Hôm nay tôi sẽ giúp đỡ một người khó khăn..."
-        )
-        
-        confirmed_positive_action = st.checkbox("✨ Tôi đã thành tâm thực hiện / viết ra điều trên và xin nhận file tài liệu.")
-        
-        if confirmed_positive_action:
-            if st.session_state.mistral_docx_bytes:
-                st.download_button(
-                    label=f"📥 Tải xuống file Word ngay ({current_file_name}.docx)",
-                    data=st.session_state.mistral_docx_bytes,
-                    file_name=f"{current_file_name}.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True
-                )
-                st.success("🙏 Cảm ơn bạn đã gieo nhân duyên lành! Chúc bạn một ngày ngập tràn bình an và năng lượng tích cực.")
-            else:
-                st.warning("Chưa có dữ liệu file Word để tải.")
+        # --- NÚT TẢI WORD LUÔN HIỂN THỊ ---
+        if st.session_state.mistral_docx_bytes:
+            st.download_button(
+                label=f"📥 Tải xuống file Word chuẩn Pandoc ({current_file_name}.docx)",
+                data=st.session_state.mistral_docx_bytes,
+                file_name=f"{current_file_name}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
+            )
         else:
-            st.markdown("🔒 *Vui lòng chọn hình thức, viết chia sẻ và tích chọn ô xác nhận ở trên để mở khóa nút tải file Word.*")
+            st.warning("Chưa có dữ liệu file Word để tải.")
+
+        # --- TÍNH NĂNG CỔNG THANH TOÁN TÂM LINH & NĂNG LƯỢNG TÍCH CỰC ---
+        with st.expander("🌟 Gieo hạt phước báu & Lan tỏa năng lượng tích cực (Tùy tâm)"):
+            st.info("Ứng dụng hoàn toàn miễn phí! Bạn có thể hoan hỷ chia sẻ một chút năng lượng tích cực bằng cách chọn hoặc tự viết một câu niệm, lời cầu nguyện hoặc việc tốt.")
+            faith_choice = st.selectbox(
+                "Bạn muốn gửi gắm năng lượng tích cực theo hình thức nào?",
+                [
+                    "🙏 Niệm Phật / Bồ Tát (Nam Mô A Di Đà Phật, Quan Thế Âm...)",
+                    "✝️ Cầu nguyện theo Đức Chúa Trời / Thiên Chúa",
+                    "📿 Lời khấn nguyện / Niệm thần thánh theo tôn giáo của tôi",
+                    "🌿 Cam kết làm một việc tốt / Giúp ích cho đời trong hôm nay"
+                ]
+            )
+            user_custom_prayer = st.text_area(
+                "Viết câu niệm, lời khấn nguyện hoặc việc tốt của bạn vào đây:",
+                placeholder="Ví dụ: Nam Mô Bản Sư Thích Ca Mâu Ni Phật / Amen / Hôm nay tôi sẽ giúp đỡ một người khó khăn..."
+            )
+            if st.button("✨ Gửi gắm phước báu & Nhận niệm lành"):
+                st.success("🙏 Cảm ơn bạn rất nhiều vì đã gieo nhân duyên lành! Chúc bạn và gia đình một ngày ngập tràn bình an, may mắn và vạn sự hanh thông.")
 
         with st.expander("📦 Tùy chọn nâng cao: Tải gói file ZIP thô (Markdown + Thư mục Ảnh)"):
             if st.session_state.get("mistral_raw_zip_bytes"):
