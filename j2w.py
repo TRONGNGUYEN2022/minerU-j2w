@@ -77,7 +77,7 @@ DEFAULT_MINERU_KEY = saved_config.get("mineru_key", "sk-IDb81Oj2W6pHrODooHN0xtKT
 DEFAULT_GEMINI_KEY = saved_config.get("gemini_key", "AQ.Ab8RN6IiVh_ufztKik5rSMrl39c-U6_L6v5oy_Qru1-YNUBdRg")
 DEFAULT_MISTRAL_KEY = saved_config.get("mistral_key", "Asht2uDLjH8WTWnU06dBWdPbpcVQrbt5")
 
-st.set_page_config(page_title="Convert PDF/Image to word (MinerU - Mistral - Gemini)", page_icon="📐", layout="wide")
+st.set_page_config(page_title="RPG Spiritual Document Converter", page_icon="⚔️", layout="wide")
 MINERU_BASE_URL = "https://mineru.net"
 
 DEFAULT_DOWNLOAD_DIR = "downloaded_mineru_files"
@@ -99,7 +99,7 @@ if "active_images_dict" not in st.session_state:
 if "active_file_name" not in st.session_state:
     st.session_state.active_file_name = "Document"
 
-# Trạng thái hành trình tâm linh
+# Trạng thái game RPG
 if "spiritual_journey_started" not in st.session_state:
     st.session_state.spiritual_journey_started = False
 
@@ -228,22 +228,6 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
     except:
         return None, {}
 
-def collect_image_paths_from_block(block):
-    paths = []
-    for key in ["image_path", "img_path", "path", "src"]:
-        val = block.get(key)
-        if val: paths.append(val)
-    for sub_b in block.get("blocks", []):
-        if isinstance(sub_b, dict): paths.extend(collect_image_paths_from_block(sub_b))
-    for line in block.get("lines", []):
-        if isinstance(line, dict):
-            for span in line.get("spans", []):
-                if isinstance(span, dict):
-                    for key in ["image_path", "img_path", "path", "src"]:
-                        val = span.get(key)
-                        if val: paths.append(val)
-    return paths
-
 def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_name="document"):
     preview_inner_html = '<div id="content-to-copy" style="font-family: Arial, sans-serif; line-height: 1.8; color: #2d3748; font-size: 16px;">'
     pages = json_data if isinstance(json_data, list) else json_data.get("pdf_info", [])
@@ -266,182 +250,137 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
 
 
 # ==========================================
-# MÀN HÌNH CHÀO NHẬP VAI TÂM LINH (CÓ VIDEO, VỊ SƯ / ĐỨC CHA VÀ ÂM THANH)
+# MÀN HÌNH GAME NHẬP VAI TÂM LINH (CÓ ÂM THANH CHUÔNG & TIẾNG CHIM HÓT)
 # ==========================================
 if not st.session_state.spiritual_journey_started:
     
-    # Đoạn mã HTML/JS tạo rạp chiếu video nền, nhân vật dẫn chuyện và âm thanh sống động
-    spiritual_intro_game_html = """
+    # Nhúng giao diện game RPG kết hợp âm thanh tự động
+    rpg_audio_component = """
     <!DOCTYPE html>
     <html lang="vi">
     <head>
         <meta charset="UTF-8">
         <style>
-            body {
-                margin: 0;
-                padding: 0;
-                background-color: #0f172a;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                color: #f8fafc;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                overflow: hidden;
-            }
-            .container {
-                position: relative;
-                width: 95%;
-                max-width: 850px;
-                background: linear-gradient(135deg, rgba(30, 41, 59, 0.9), rgba(15, 23, 42, 0.95));
-                border-radius: 16px;
-                box-shadow: 0 20px 40px rgba(0,0,0,0.6);
-                border: 2px solid #d97706;
+            .rpg-box {
+                background: linear-gradient(135deg, #1e1b4b, #0f172a);
+                border: 2px solid #f59e0b;
+                border-radius: 12px;
                 padding: 25px;
+                color: #f3f4f6;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+                font-family: sans-serif;
                 text-align: center;
             }
-            h1 {
+            .rpg-title {
                 color: #fbbf24;
-                margin-bottom: 5px;
-                font-size: 26px;
-                text-shadow: 0 2px 4px rgba(0,0,0,0.5);
-            }
-            .subtitle {
-                color: #94a3b8;
-                font-size: 14px;
-                margin-bottom: 20px;
-            }
-            .video-box {
-                position: relative;
-                width: 100%;
-                height: 260px;
-                border-radius: 10px;
-                overflow: hidden;
-                border: 1px solid #475569;
-                background: #000;
-                margin-bottom: 15px;
-            }
-            video {
-                width: 100%;
-                height: 100%;
-                object-fit: cover;
-                opacity: 0.85;
-            }
-            .character-dialogue {
-                position: absolute;
-                bottom: 15px;
-                left: 15px;
-                right: 15px;
-                background: rgba(15, 23, 42, 0.85);
-                border-left: 4px solid #fbbf24;
-                padding: 10px 15px;
-                border-radius: 6px;
-                text-align: left;
-                font-size: 14px;
-                color: #e2e8f0;
-                backdrop-filter: blur(4px);
-            }
-            .speaker-name {
+                font-size: 24px;
                 font-weight: bold;
-                color: #fbbf24;
-                margin-bottom: 3px;
+                margin-bottom: 8px;
+                text-transform: uppercase;
+                letter-spacing: 1px;
             }
-            .audio-control {
-                margin-top: 10px;
+            .rpg-dialogue {
+                background: rgba(15, 23, 42, 0.95);
+                border-left: 5px solid #f59e0b;
+                padding: 15px 20px;
+                border-radius: 8px;
+                margin: 15px 0;
+                font-size: 15px;
+                line-height: 1.6;
+                color: #e2e8f0;
+                text-align: left;
             }
-            button.audio-btn {
+            .audio-panel {
+                margin-top: 15px;
+                display: flex;
+                justify-content: center;
+                gap: 10px;
+            }
+            button.rpg-btn {
                 background: #0d9488;
                 color: white;
                 border: none;
-                padding: 6px 14px;
-                border-radius: 4px;
+                padding: 8px 16px;
+                border-radius: 6px;
                 cursor: pointer;
                 font-weight: bold;
-                font-size: 12px;
-                transition: background 0.3s;
+                font-size: 13px;
+                transition: 0.3s;
             }
-            button.audio-btn:hover {
-                background: #0f766e;
-            }
+            button.rpg-btn:hover { background: #0f766e; }
+            button.stop-btn { background: #b91c1c; }
+            button.stop-btn:hover { background: #991b1b; }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>⛩️ Cổng Điện Tịnh Tâm & Tri Thức</h1>
-            <div class="subtitle">Nơi giao hòa giữa công nghệ hiện đại và sự bình an tâm linh</div>
+        <div class="rpg-box">
+            <div class="rpg-title">⚔️ Lữ Trình Tâm Linh: Cổng Khai Sáng Tri Thức ⚔️</div>
+            <div style="color: #94a3b8; font-style: italic; font-size: 13px;">Chương I: Tiếng Chuông Ngân & Sự Tỉnh Thức Giữa Vô Thường</div>
             
-            <div class="video-box">
-                <!-- Video động phong cảnh ngôi cổ tự / thánh đường -->
-                <video autoplay muted loop id="bg-video">
-                    <source src="https://assets.mixkit.co/videos/preview/mixkit-zen-stones-in-a-zen-garden-42999-large.mp4" type="video/mp4">
-                    Trình duyệt không hỗ trợ video.
-                </video>
-                
-                <div class="character-dialogue">
-                    <div class="speaker-name" id="guide-title">🧘 Vị Thiền Sư / Đức Cha dẫn đường:</div>
-                    <div id="guide-text">"Chào mừng lữ khách đã bước đến không gian thanh tịnh. Hãy hít thở sâu, lắng nghe tiếng chuông ngân và tiếng chim hót để tâm hồn tĩnh lặng trước khi khai mở tri thức."</div>
-                </div>
+            <div class="rpg-dialogue">
+                <b>📜 Hiền Giả (Thiền Sư / Đức Cha):</b><br>
+                <i>"Chào lữ khách phương xa! Hãy lắng nghe tiếng chuông đồng vọng và tiếng chim hót thanh bình để trút bỏ mọi muộn phiền văn bản. Hãy chọn thánh địa và thắp nén tâm hương để mở khóa cánh cổng chính..."</i>
             </div>
 
-            <!-- Âm thanh thiên nhiên & chuông ngân ngầm -->
-            <audio autoplay loop id="ambient-audio">
+            <!-- Phát âm thanh tiếng chim hót & thiên nhiên ngầm -->
+            <audio autoplay loop id="rpg-nature-audio">
                 <source src="https://actions.google.com/sounds/v1/ambiences/morning_birds.ogg" type="audio/ogg">
             </audio>
 
-            <div class="audio-control">
-                <button class="audio-btn" onclick="document.getElementById('ambient-audio').play()">🔊 Mở Âm Thanh Chim Hót & Thiên Nhiên</button>
-                <button class="audio-btn" style="background: #b91c1c; margin-left: 8px;" onclick="document.getElementById('ambient-audio').pause()">🔇 Tắt Âm Thanh</button>
+            <div class="audio-panel">
+                <button class="rpg-btn" onclick="document.getElementById('rpg-nature-audio').play()">🔊 Bật Âm Thanh Chim Hót & Chuông</button>
+                <button class="rpg-btn stop-btn" onclick="document.getElementById('rpg-nature-audio').pause()">🔇 Tắt Âm Thanh</button>
             </div>
         </div>
     </body>
     </html>
     """
-    components.html(spiritual_intro_game_html, height=430)
+    components.html(rpg_audio_component, height=270)
 
     st.markdown("<br>", unsafe_allow_html=True)
-    
-    col_intro1, col_intro2 = st.columns(2)
-    with col_intro1:
-        st.subheader("1. Chọn không gian tâm linh của bạn")
-        space_choice = st.selectbox(
-            "Chọn nơi bạn muốn dừng chân:",
+
+    col_rpg1, col_rpg2 = st.columns(2)
+    with col_rpg1:
+        st.markdown("### 🛡️ Lựa Chọn Tông Tôn / Môn Phái")
+        realm_choice = st.selectbox(
+            "Chọn không gian thánh địa khởi đầu:",
             [
-                "🏛️ Cổ tự thanh tịnh (Thiền sư đón tiếp, tiếng chuông ngân)",
-                "⛪ Thánh đường cổ kính (Đức cha đón tiếp, ánh nắng thánh đường)",
-                "🌿 Khu vườn tĩnh lặng (Thiên nhiên hòa quyện, tâm hồn rộng mở)"
+                "🏛️ Cổ Tự Thiền Môn (Sư Tôn dẫn dắt, tiếng chuông đồng vọng)",
+                "⛪ Thánh Đường Ánh Sáng (Đức Cha dẫn dắt, ánh hào quang kính màu)",
+                "🌿 Thâm Sơn Cốc Ẩn (Đạo sĩ hòa mình cùng thiên nhiên cỏ cây)"
             ]
         )
         
-        avatar_choice = st.selectbox(
-            "Chọn nhân vật đại diện cho chuyến đi:",
+        class_choice = st.selectbox(
+            "Chọn Class Nhân Vật Của Bạn:",
             [
-                "🧘 Lữ khách tìm kiếm sự bình an",
-                "📚 Người hành hương mang khát vọng tri thức",
-                "✨ Tâm hồn hướng thiện, gieo hạt việc tốt"
+                "🧘 Hành Giả Tĩnh Lặng (Buff độ tập trung cao độ)",
+                "📚 Học Giả Thông Thái (Tăng tốc độ giải mã văn bản)",
+                "⚔️ Hiệp Sĩ Thiện Nguyện (Chuyên gieo hạt phước báu tích cực)"
             ]
         )
 
-    with col_intro2:
-        st.subheader("2. Gửi gắm tâm nguyện / Câu niệm lành")
-        user_intro_prayer = st.text_area(
-            "Thắp một nén tâm hương ý niệm (Niệm Phật, Cầu nguyện, hay cam kết việc tốt):",
-            placeholder="Ví dụ: Nam Mô Quan Thế Âm Bồ Tát / Amen / Hôm nay tôi sẽ hoàn thành tốt công việc và giúp đỡ mọi người..."
+    with col_rpg2:
+        st.markdown("### 🕯️ Nghi Thức Khấn Nguyện (Quest Oath)")
+        player_oath = st.text_area(
+            "Viết lời thề / Câu niệm phật / Tâm nguyện hôm nay của bạn:",
+            placeholder="Ví dụ: Nam Mô Bản Sư Thích Ca Mâu Ní Phật / Amen / Hôm nay ta quyết tâm hoàn thành trọn vẹn văn bản này..."
         )
         
-        accept_journey = st.checkbox("✨ Tôi đã thành tâm tĩnh lòng và sẵn sàng bước vào hành trình.")
+        accept_quest = st.checkbox("⚡ Ta đã sẵn sàng chấp nhận thử thách và cam kết hành động thiện lương.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-    with col_btn2:
-        if accept_journey:
-            if st.button("🚀 Bước vào Cổng Tri Thức & Mở Khóa Công Cụ", use_container_width=True):
+    col_b1, col_b2, col_b3 = st.columns([1, 2, 1])
+    with col_b2:
+        if accept_quest:
+            if st.button("🔮 KHAI MỞ CỔNG TRI THỨC (START GAME)", use_container_width=True):
                 st.session_state.spiritual_journey_started = True
-                log_info(f"Lữ khách đã bắt đầu hành trình với không gian: {space_choice} và nhân vật: {avatar_choice}")
-                st.success("🙏 Hành trình đã bắt đầu! Chúc bạn gặt hái được nhiều kết quả tốt đẹp.")
+                log_info(f"Người chơi chọn Thánh Địa: {realm_choice} | Class: {class_choice} | Tâm nguyện: {player_oath}")
+                st.success("🎉 Nghi thức thành công! Năng lượng phước báu đã được kích hoạt. Đang dịch chuyển vào thế giới chính...")
                 st.rerun()
         else:
-            st.markdown("<p style='text-align: center; color: #e53e3e;'>🔒 <i>Vui lòng tích chọn ô xác nhận tĩnh lòng ở trên để mở khóa cánh cổng.</i></p>", unsafe_allow_html=True)
+            st.warning("🔒 Bạn cần hoàn thành lời thề và tích chọn ô xác nhận để mở khóa cửa ải!")
 
     st.stop()
 
