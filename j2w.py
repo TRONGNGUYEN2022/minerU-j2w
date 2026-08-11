@@ -7,11 +7,31 @@ import zipfile
 import time
 import shutil
 import tempfile
+import logging
+from datetime import datetime
 from bs4 import BeautifulSoup
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import pypandoc
+
+# --- CẤU HÌNH GHI FILE LOG ---
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    encoding="utf-8"
+)
+
+def log_info(msg):
+    logging.info(msg)
+
+def log_error(msg):
+    logging.error(msg)
 
 # Import thư viện google-genai chính thức mới nhất
 try:
@@ -128,8 +148,8 @@ def extract_zip_and_get_data(zip_bytes):
             elif filename.endswith("layout.json") and not filename.startswith("__MACOSX"):
                 try:
                     json_data = json.loads(z.read(filename).decode("utf-8"))
-                except Exception:
-                    pass
+                except Exception as e:
+                    log_error(f"Lỗi đọc layout.json từ ZIP: {e}")
     return json_data, images_dict
 
 def get_image_bytes(img_path_str, images_dict, json_upload_dir=""):
@@ -170,6 +190,7 @@ def upload_temp_file_robust(uploaded_file):
 
     for service in upload_services:
         try:
+            log_info(f"Đang thử upload file qua dịch vụ trung gian: {service['name']}")
             files = {service["file_key"]: (file_name, file_bytes, file_type)}
             res = requests.post(service["url"], data=service["data"], files=files, timeout=30)
             
@@ -182,13 +203,17 @@ def upload_temp_file_robust(uploaded_file):
                             raw_url = res_json.get("data", {}).get("url", "")
                             if "tmpfiles.org/" in raw_url and not "tmpfiles.org/dl/" in raw_url:
                                 raw_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
+                            log_info(f"Upload thành công qua TmpFiles: {raw_url}")
                             return raw_url
                     except:
                         pass
                 elif result_text.startswith("http"):
+                    log_info(f"Upload thành công qua {service['name']}: {result_text}")
                     return result_text
-        except Exception:
+        except Exception as e:
+            log_error(f"Lỗi khi upload qua {service['name']}: {str(e)}")
             continue
+    log_error("Tất cả các dịch vụ upload trung gian đều thất bại.")
     return None
 
 def start_mineru_task_by_url(api_token, file_url):
@@ -196,12 +221,20 @@ def start_mineru_task_by_url(api_token, file_url):
     headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
     payload = {"url": file_url, "model_version": "vlm", "is_ocr": True}
     try:
+        log_info(f"Đang gửi request tạo task MinerU cho URL: {file_url}")
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         if response.status_code == 200:
             res_json = response.json()
             if res_json.get("code") == 0:
-                return res_json.get("data", {}).get("task_id")
-    except: pass
+                task_id = res_json.get("data", {}).get("task_id")
+                log_info(f"Tạo task MinerU thành công. Task ID: {task_id}")
+                return task_id
+            else:
+                log_error(f"MinerU trả về mã lỗi code != 0: {res_json}")
+        else:
+            log_error(f"MinerU API Error: Status {response.status_code} - {response.text}")
+    except Exception as e:
+        log_error(f"Lỗi kết nối khi gọi MinerU API: {str(e)}")
     return None
 
 def check_task_status_v4(api_token, task_id):
@@ -212,16 +245,20 @@ def check_task_status_v4(api_token, task_id):
         if response.status_code == 200:
             res_json = response.json()
             return res_json.get("data", {})
-    except Exception:
-        pass
+        else:
+            log_error(f"Kiểm tra status task {task_id} lỗi: Status {response.status_code}")
+    except Exception as e:
+        log_error(f"Exception khi check task status {task_id}: {str(e)}")
     return {}
 
 def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
     if not GEMINI_AVAILABLE:
+        log_error("Thư viện google-genai chưa được cài đặt.")
         st.error("Chưa cài đặt thư viện `google-genai`.")
         return None, {}
     
     try:
+        log_info(f"Đang kích hoạt fallback bằng model Gemini: {selected_model}")
         client = genai.Client(api_key=gemini_api_key)
         file_bytes = uploaded_file.getvalue()
         mime_type = uploaded_file.type
@@ -249,8 +286,10 @@ def fallback_process_with_gemini(uploaded_file, gemini_api_key, selected_model):
                 }]
             }]
         }
+        log_info("Fallback Gemini xử lý thành công.")
         return simulated_json, {}
     except Exception as e:
+        log_error(f"Lỗi khi xử lý fallback bằng Gemini: {str(e)}")
         st.error(f"Lỗi khi xử lý bằng Gemini: {e}")
         return None, {}
 
@@ -402,6 +441,7 @@ with tab1:
             save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
             st.session_state.api_key_editable = False
             st.success("Đã lưu MinerU Key vào server!")
+            log_info("Đã cập nhật MinerU API Key mới.")
             st.rerun()
             
     with col_k2:
@@ -418,6 +458,7 @@ with tab1:
             save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
             st.session_state.gemini_key_editable = False
             st.success("Đã lưu Gemini Key vào server!")
+            log_info("Đã cập nhật Gemini API Key mới.")
             st.rerun()
 
     selected_gemini_model = st.selectbox("Chọn Model Gemini dự phòng:", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"], index=0)
@@ -429,6 +470,7 @@ with tab1:
         else:
             success_processed = False
             task_id = None
+            log_info(f"Bắt đầu xử lý file qua Tab 1: {api_file.name}")
             
             with st.spinner("Đang tải file lên máy chủ trung gian..."):
                 file_url = upload_temp_file_robust(api_file)
@@ -442,7 +484,6 @@ with tab1:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    # Thử kiểm tra trạng thái MinerU trong vòng 40 lần (mỗi lần 3 giây)
                     for i in range(40):
                         time.sleep(3)
                         task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
@@ -452,6 +493,7 @@ with tab1:
                         if state == "done":
                             full_zip_url = task_data.get("full_zip_url")
                             if full_zip_url:
+                                log_info(f"MinerU hoàn thành task {task_id}. Đang tải file ZIP kết quả...")
                                 r_zip = requests.get(full_zip_url)
                                 if r_zip.status_code == 200:
                                     found_json, images_dict = extract_zip_and_get_data(r_zip.content)
@@ -460,24 +502,29 @@ with tab1:
                                         st.session_state.active_images_dict = images_dict
                                         st.session_state.active_file_name = api_file.name.rsplit(".", 1)[0]
                                         st.success("Đã hoàn tất phân tích bằng MinerU thành công!")
+                                        log_info("Xử lý thành công bằng MinerU chính hãng.")
                                         success_processed = True
                                         st.rerun()
                             break
                         elif state == "failed":
+                            log_error(f"MinerU báo lỗi xử lý thất bại (failed) đối với task {task_id}.")
                             st.warning("MinerU báo lỗi xử lý thất bại đối với file này.")
                             break
                         
                         progress_bar.progress(min((i + 1) * 2, 100))
                 else:
-                    st.warning("Không thể khởi tạo Task ID trên MinerU (Server có thể đang quá tải hoặc Token lỗi).")
+                    log_warning_msg = "Không thể khởi tạo Task ID trên MinerU."
+                    log_error(log_warning_msg)
+                    st.warning(log_warning_msg)
             else:
+                log_error("Không thể tải file lên máy chủ trung gian.")
                 st.warning("Không thể tải file lên máy chủ trung gian.")
 
-            # Chỉ khi MinerU thực sự thất bại hoặc không lấy được task_id thì mới chạy dự phòng sang Gemini
             if not success_processed:
                 active_key = st.session_state.saved_gemini_key.strip()
                 if active_key:
                     st.info(f"Đang chuyển sang trích xuất dự phòng bằng {selected_gemini_model} do MinerU không phản hồi...")
+                    log_info(f"Chuyển hướng fallback sang Gemini model: {selected_gemini_model}")
                     with st.spinner(f"Đang xử lý bằng {selected_gemini_model}..."):
                         g_json, g_imgs = fallback_process_with_gemini(api_file, active_key, selected_gemini_model)
                         if g_json:
@@ -487,10 +534,11 @@ with tab1:
                             st.success(f"Đã hoàn tất trích xuất thay thế bằng {selected_gemini_model}!")
                             st.rerun()
                 else:
+                    log_error("MinerU thất bại và thiếu Gemini API Key dự phòng.")
                     st.error("MinerU không khả dụng và chưa có Gemini API Key dự phòng để thay thế!")
 
 # ==========================================
-# TAB 2: MISTRAL OCR (CHUẨN TÊN ẢNH ĐỂ PANDOC NHÚNG VÀO WORD)
+# TAB 2: MISTRAL OCR
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -507,6 +555,7 @@ with tab2:
         save_config(st.session_state.saved_gemini_key, st.session_state.saved_mistral_key, st.session_state.saved_mineru_key)
         st.session_state.mistral_key_editable = False
         st.success("Đã lưu Mistral Key vào server!")
+        log_info("Đã cập nhật Mistral API Key mới.")
         st.rerun()
 
     mistral_file = st.file_uploader("Chọn file PDF hoặc ảnh xử lý qua Mistral OCR", type=["pdf", "png", "jpg", "jpeg"], key="mistral_upload")
@@ -523,6 +572,7 @@ with tab2:
             cleanup_old_temp_files()
             original_full_name = mistral_file.name
             base_name_only = original_full_name.rsplit('.', 1)[0]
+            log_info(f"Bắt đầu xử lý Mistral OCR cho file: {original_full_name}")
 
             with st.spinner("Đang gửi PDF lên Mistral OCR API và xử lý nhúng ảnh chuẩn Pandoc..."):
                 try:
@@ -543,7 +593,6 @@ with tab2:
                     if hasattr(ocr_response, "pages"):
                         for idx, page in enumerate(ocr_response.pages):
                             page_md = page.markdown if hasattr(page, "markdown") else ""
-                            # Chuẩn hóa đường dẫn Markdown để gọi đúng chuẩn tên file ảnh
                             page_md = re.sub(r'!\[(.*?)\]\([^)]*?(img[_-]\d+\.(?:jpeg|jpg|png))\)', r'![\1](\2)', page_md)
                             page_md_safe = re.sub(r'^\s*---\s*$', '<hr/>', page_md, flags=re.MULTILINE)
                             full_markdown += f"\n\n<hr/>\n<h3>Trang {idx+1}</h3>\n\n" + page_md_safe
@@ -556,13 +605,11 @@ with tab2:
                                         if "," in img_b64: img_b64 = img_b64.split(",")[1]
                                         try:
                                             img_data_decoded = base64.b64decode(img_b64)
-                                            # Đảm bảo tên file sạch sẽ, chuẩn xác đúng một đuôi .jpeg duy nhất tránh lỗi .jpeg.jpeg
                                             img_filename = img_id if img_id.lower().endswith((".jpeg", ".jpg", ".png")) else f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_data_decoded
                                         except: 
                                             pass
 
-                    # --- TẠO FILE ZIP THÔ (TÙY CHỌN DỰ PHÒNG CHO NGƯỜI DÙNG) ---
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                         zip_file.writestr("output.md", full_markdown)
@@ -570,7 +617,6 @@ with tab2:
                             zip_file.writestr(f"images/{img_name}", img_bytes)
                     st.session_state.mistral_raw_zip_bytes = zip_buffer.getvalue()
 
-                    # --- BIÊN DỊCH WORD BẰNG PANDOC TRONG THƯ MỤC TẠM ---
                     with tempfile.TemporaryDirectory() as tmp_dir:
                         temp_md_path = os.path.join(tmp_dir, "temp_input.md")
                         with open(temp_md_path, "w", encoding="utf-8") as f:
@@ -601,14 +647,14 @@ with tab2:
                     st.session_state.active_images_dict = images_dict
                     st.session_state.active_file_name = base_name_only
                     
+                    log_info("Xử lý Mistral OCR thành công.")
                     st.success("🎉 Xử lý Mistral OCR và nhúng ảnh vào Word thành công!")
                 except Exception as e:
+                    log_error(f"Lỗi Mistral OCR: {str(e)}")
                     st.error(f"Lỗi Mistral OCR: {e}")
 
-    # Hiển thị Khung Preview HTML & Nút Tải Word Chuẩn
     if st.session_state.mistral_preview_markdown:
         st.divider()
-        
         current_file_name = st.session_state.get("active_file_name", "Document")
         
         col_m1, col_m2 = st.columns([2, 1])
@@ -624,7 +670,6 @@ with tab2:
                     use_container_width=True
                 )
 
-        # --- TÙY CHỌN MỞ RỘNG: TẢI FILE ZIP THÔ ---
         with st.expander("📦 Tùy chọn nâng cao: Tải gói file ZIP thô (Markdown + Thư mục Ảnh)"):
             if st.session_state.get("mistral_raw_zip_bytes"):
                 st.download_button(
@@ -726,7 +771,6 @@ with tab2:
         """
         components.html(mistral_component_html, height=780, scrolling=False)
 
-
 # ==========================================
 # TAB 3: MINERU WEB EXTRACTOR
 # ==========================================
@@ -747,11 +791,12 @@ with tab3:
             st.session_state.active_file_name = web_json_f.name.rsplit(".", 1)[0]
             if web_image_files:
                 st.session_state.active_images_dict = {img.name: img.getvalue() for img in web_image_files}
+            log_info(f"Nạp file layout.json từ Web Extractor thành công: {web_json_f.name}")
             st.success("Đã nạp dữ liệu thành công từ Web Extractor!")
             st.rerun()
         except Exception as e:
+            log_error(f"Lỗi khi nạp file từ Web Extractor: {e}")
             st.error(f"Lỗi: {e}")
-
 
 # ==========================================
 # TAB 4: TẢI FILE CÓ SẴN (OFFLINE)
@@ -770,6 +815,7 @@ with tab4:
                     st.session_state.active_json = found_json
                     st.session_state.active_images_dict = images_dict
                     st.session_state.active_file_name = offline_file.name.rsplit(".", 1)[0]
+                    log_info(f"Nạp file ZIP offline thành công: {offline_file.name}")
                     st.success("Đã nạp file ZIP thành công!")
                     st.rerun()
             elif offline_file.name.endswith(".json"):
@@ -777,11 +823,12 @@ with tab4:
                 st.session_state.active_file_name = offline_file.name.rsplit(".", 1)[0]
                 if image_files:
                     st.session_state.active_images_dict = {img.name: img.getvalue() for img in image_files}
+                log_info(f"Nạp file layout.json offline thành công: {offline_file.name}")
                 st.success("Đã nạp file layout.json thành công!")
                 st.rerun()
         except Exception as e:
+            log_error(f"Lỗi khi đọc file offline: {e}")
             st.error(f"Lỗi khi đọc file: {e}")
-
 
 # ==========================================
 # HIỂN THỊ PREVIEW CHO MINERU / GEMINI
