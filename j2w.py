@@ -840,7 +840,12 @@ if st.session_state.active_json is not None:
         st.session_state.active_images_dict,
         file_name=st.session_state.active_file_name
     )
-    with st.expander("🛠️ Xem Nhật ký hệ thống (System Logs)"):
+
+# ==========================================
+# KHUNG XEM NHẬT KÝ HỆ THỐNG (SYSTEM LOGS)
+# ==========================================
+st.divider()
+with st.expander("🛠️ Xem Nhật ký hệ thống (System Logs)"):
     if os.path.exists("logs/app.log"):
         with open("logs/app.log", "r", encoding="utf-8") as log_file:
             log_content = log_file.read()
