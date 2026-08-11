@@ -219,7 +219,14 @@ def upload_temp_file_robust(uploaded_file):
 def start_mineru_task_by_url(api_token, file_url):
     url = f"{MINERU_BASE_URL}/api/v4/extract/task"
     headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
-    payload = {"url": file_url, "model_version": "vlm", "is_ocr": True}
+    
+    # Payload chuẩn theo tài liệu MinerU API v4 cho tệp PDF nặng/phức tạp
+    payload = {
+        "url": file_url, 
+        "model_version": "vlm", 
+        "is_ocr": True
+    }
+    
     try:
         log_info(f"Đang gửi request tạo task MinerU cho URL: {file_url}")
         response = requests.post(url, json=payload, headers=headers, timeout=30)
@@ -484,8 +491,9 @@ with tab1:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    for i in range(40):
-                        time.sleep(3)
+                    # Tăng vòng lặp từ 40 lên 60 lần (cho phép chờ tới 300 giây đối với tài liệu dày)
+                    for i in range(60):
+                        time.sleep(5)
                         task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
                         state = task_data.get("state")
                         status_text.text(f"Trạng thái MinerU: {state}")
@@ -511,7 +519,7 @@ with tab1:
                             st.warning("MinerU báo lỗi xử lý thất bại đối với file này.")
                             break
                         
-                        progress_bar.progress(min((i + 1) * 2, 100))
+                        progress_bar.progress(min((i + 1) * 1.5, 100))
                 else:
                     log_warning_msg = "Không thể khởi tạo Task ID trên MinerU."
                     log_error(log_warning_msg)
