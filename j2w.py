@@ -422,13 +422,28 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
 
 
 # ==========================================
-# GIAO DIỆN MÀN HÌNH CHÀO NHẬP VAI TÂM LINH
+# GIAO DIỆN MÀN HÌNH CHÀO NHẬP VAI TÂM LINH (CÓ ÂM THANH CHUÔNG & TIẾNG CHIM HÓT)
 # ==========================================
 if not st.session_state.spiritual_journey_started:
-    st.markdown("<h1 style='text-align: center; color: #d69e2e;'>⛩️ Điện Tịnh Tâm & Hành Trình Tri Thức</h1>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #4a5568; font-size: 18px;'>Chào mừng lữ khách đến với không gian chuyển hóa tài liệu và gieo hạt phước báu.</p>", unsafe_allow_html=True)
-    
-    st.divider()
+    intro_html_audio = """
+    <div style="background: linear-gradient(135deg, #1a202c, #2d3748); padding: 30px; border-radius: 15px; color: #fff; text-align: center; font-family: Arial, sans-serif; box-shadow: 0 10px 25px rgba(0,0,0,0.3);">
+        <h1 style="color: #ecc94b; margin-bottom: 10px;">⛩️ Điện Tịnh Tâm & Hành Trình Tri Thức</h1>
+        <p style="color: #cbd5e0; font-size: 16px; margin-bottom: 20px;">Lắng nghe tiếng chim hót thanh bình và thiên nhiên để khởi đầu một ngày an lành.</p>
+        
+        <audio autoplay loop id="nature-sound">
+            <source src="https://actions.google.com/sounds/v1/ambiences/morning_birds.ogg" type="audio/ogg">
+            Trình duyệt của bạn không hỗ trợ audio.
+        </audio>
+        
+        <div style="margin-top: 15px;">
+            <button onclick="document.getElementById('nature-sound').play()" style="background: #319795; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold; margin-right: 10px;">🔊 Bật âm thanh thiên nhiên</button>
+            <button onclick="document.getElementById('nature-sound').pause()" style="background: #e53e3e; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold;">🔇 Tắt âm thanh</button>
+        </div>
+    </div>
+    """
+    components.html(intro_html_audio, height=220)
+
+    st.markdown("<br>", unsafe_allow_html=True)
     
     col_intro1, col_intro2 = st.columns(2)
     with col_intro1:
