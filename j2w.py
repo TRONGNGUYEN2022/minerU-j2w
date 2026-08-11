@@ -422,13 +422,12 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     st.markdown("### 👁️ Bản xem trước Nội dung MinerU / Gemini")
     components.html(copier_component, height=750, scrolling=False)
 
-# --- 5. GIAO DIỆN CHÍNH (4 TABS) ---
+# --- 5. GIAO DIỆN CHÍNH (3 TABS: Đã rút gọn) ---
 st.title("📐 Convert PDF/Image to word (MinerU - Mistral - Gemini)")
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab4 = st.tabs([
     "🚀 Gửi lên MinerU Server (API)", 
     "🌪️ Mistral OCR (API + Pandoc)",
-    "🌐 MinerU Web Extractor", 
     "📁 Tải file có sẵn (Offline)"
 ])
 
@@ -491,7 +490,6 @@ with tab1:
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    # Tăng vòng lặp từ 40 lên 60 lần (cho phép chờ tới 300 giây đối với tài liệu dày)
                     for i in range(60):
                         time.sleep(5)
                         task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
@@ -778,33 +776,6 @@ with tab2:
         </html>
         """
         components.html(mistral_component_html, height=780, scrolling=False)
-
-# ==========================================
-# TAB 3: MINERU WEB EXTRACTOR
-# ==========================================
-with tab3:
-    st.subheader("🌐 MinerU Web Extractor (Nhúng trực tiếp)")
-    st.markdown("[🔗 Mở trang MinerU Web Extractor trong tab mới](https://mineru.net/OpenSourceTools/Extractor)", unsafe_allow_html=True)
-    components.iframe("https://mineru.net/OpenSourceTools/Extractor", height=650, scrolling=True)
-    
-    st.divider()
-    st.subheader("📥 Nạp file kết quả từ Web Extractor")
-    web_json_f = st.file_uploader("Tải file layout.json từ gói kết quả Web", type=["json"], key="web_json_tab3")
-    web_image_files = st.file_uploader("Tải toàn bộ file ảnh trong thư mục images", type=["png", "jpg", "jpeg"], accept_multiple_files=True, key="web_imgs_tab3")
-    
-    if web_json_f:
-        try:
-            json_bytes = web_json_f.getvalue()
-            st.session_state.active_json = json.loads(json_bytes.decode("utf-8"))
-            st.session_state.active_file_name = web_json_f.name.rsplit(".", 1)[0]
-            if web_image_files:
-                st.session_state.active_images_dict = {img.name: img.getvalue() for img in web_image_files}
-            log_info(f"Nạp file layout.json từ Web Extractor thành công: {web_json_f.name}")
-            st.success("Đã nạp dữ liệu thành công từ Web Extractor!")
-            st.rerun()
-        except Exception as e:
-            log_error(f"Lỗi khi nạp file từ Web Extractor: {e}")
-            st.error(f"Lỗi: {e}")
 
 # ==========================================
 # TAB 4: TẢI FILE CÓ SẴN (OFFLINE)
