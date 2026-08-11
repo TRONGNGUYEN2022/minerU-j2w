@@ -219,13 +219,7 @@ def upload_temp_file_robust(uploaded_file):
 def start_mineru_task_by_url(api_token, file_url):
     url = f"{MINERU_BASE_URL}/api/v4/extract/task"
     headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
-    
-    # Payload chuẩn theo tài liệu MinerU API v4 cho tệp PDF nặng/phức tạp
-    payload = {
-        "url": file_url, 
-        "model_version": "vlm", 
-        "is_ocr": True
-    }
+    payload = {"url": file_url, "model_version": "vlm", "is_ocr": True}
     
     try:
         log_info(f"Đang gửi request tạo task MinerU cho URL: {file_url}")
@@ -422,7 +416,7 @@ def render_pure_math_preview(json_data, images_dict, json_upload_dir="", file_na
     st.markdown("### 👁️ Bản xem trước Nội dung MinerU / Gemini")
     components.html(copier_component, height=750, scrolling=False)
 
-# --- 5. GIAO DIỆN CHÍNH (3 TABS: Đã rút gọn) ---
+# --- 5. GIAO DIỆN CHÍNH (3 TABS) ---
 st.title("📐 Convert PDF/Image to word (MinerU - Mistral - Gemini)")
 
 tab1, tab2, tab4 = st.tabs([
@@ -544,7 +538,7 @@ with tab1:
                     st.error("MinerU không khả dụng và chưa có Gemini API Key dự phòng để thay thế!")
 
 # ==========================================
-# TAB 2: MISTRAL OCR
+# TAB 2: MISTRAL OCR (TÍCH HỢP CỔNG PHƯỚC BÁU & TẢI WORD)
 # ==========================================
 with tab2:
     st.subheader("🌪️ Cấu hình Mistral OCR & Pandoc")
@@ -663,18 +657,44 @@ with tab2:
         st.divider()
         current_file_name = st.session_state.get("active_file_name", "Document")
         
-        col_m1, col_m2 = st.columns([2, 1])
-        with col_m1:
-            st.subheader(f"👁️ Bản xem trước kết quả: {current_file_name}")
-        with col_m2:
+        st.subheader(f"👁️ Bản xem trước kết quả: {current_file_name}")
+
+        # --- TÍNH NĂNG CỔNG THANH TOÁN TÂM LINH & NĂNG LƯỢNG TÍCH CỰC ---
+        st.markdown("---")
+        st.subheader("🌟 Gieo hạt phước báu & Lan tỏa năng lượng tích cực")
+        st.info("Ứng dụng hoàn toàn miễn phí! Để nhận file Word, bạn hãy hoan hỷ chia sẻ một chút năng lượng tích cực bằng cách chọn hoặc tự viết một câu niệm, lời cầu nguyện hoặc một việc tốt bạn sẽ làm nhé.")
+        
+        faith_choice = st.selectbox(
+            "Bạn muốn gửi gắm năng lượng tích cực theo hình thức nào?",
+            [
+                "🙏 Niệm Phật / Bồ Tát (Nam Mô A Di Đà Phật, Quan Thế Âm...)",
+                "✝️ Cầu nguyện theo Đức Chúa Trời / Thiên Chúa",
+                "📿 Lời khấn nguyện / Niệm thần thánh theo tôn giáo của tôi",
+                "🌿 Cam kết làm một việc tốt / Giúp ích cho đời trong hôm nay"
+            ]
+        )
+        
+        user_custom_prayer = st.text_area(
+            "Viết câu niệm, lời khấn nguyện hoặc việc tốt của bạn vào đây:",
+            placeholder="Ví dụ: Nam Mô Bản Sư Thích Ca Mâu Ni Phật / Amen / Hôm nay tôi sẽ giúp đỡ một người khó khăn..."
+        )
+        
+        confirmed_positive_action = st.checkbox("✨ Tôi đã thành tâm thực hiện / viết ra điều trên và xin nhận file tài liệu.")
+        
+        if confirmed_positive_action:
             if st.session_state.mistral_docx_bytes:
                 st.download_button(
-                    label=f"📥 Tải Word chuẩn Pandoc ({current_file_name}.docx)",
+                    label=f"📥 Tải xuống file Word ngay ({current_file_name}.docx)",
                     data=st.session_state.mistral_docx_bytes,
                     file_name=f"{current_file_name}.docx",
                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     use_container_width=True
                 )
+                st.success("🙏 Cảm ơn bạn đã gieo nhân duyên lành! Chúc bạn một ngày ngập tràn bình an và năng lượng tích cực.")
+            else:
+                st.warning("Chưa có dữ liệu file Word để tải.")
+        else:
+            st.markdown("🔒 *Vui lòng chọn hình thức, viết chia sẻ và tích chọn ô xác nhận ở trên để mở khóa nút tải file Word.*")
 
         with st.expander("📦 Tùy chọn nâng cao: Tải gói file ZIP thô (Markdown + Thư mục Ảnh)"):
             if st.session_state.get("mistral_raw_zip_bytes"):
