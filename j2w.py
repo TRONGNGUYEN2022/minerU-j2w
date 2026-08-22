@@ -56,7 +56,7 @@ def load_saved_config():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        except:
             pass
     return {}
 
@@ -69,7 +69,7 @@ def save_config(gemini_key, mistral_key, mineru_key):
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config_data, f, ensure_ascii=False, indent=4)
-    except Exception:
+    except:
         pass
 
 # Đọc cấu hình đã lưu trên server (nếu có)
@@ -127,7 +127,7 @@ def cleanup_old_temp_files():
         if f_name.lower().endswith((".jpeg", ".jpg", ".png", ".docx", ".zip")) or f_name == "temp_input.md":
             try:
                 os.remove(os.path.join(root_dir, f_name))
-            except Exception:
+            except:
                 pass
 
 def clean_and_wrap_latex(latex_str):
@@ -205,7 +205,7 @@ def upload_temp_file_robust(uploaded_file):
                                 raw_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
                             log_info(f"Upload thành công qua TmpFiles: {raw_url}")
                             return raw_url
-                    except Exception:
+                    except:
                         pass
                 elif result_text.startswith("http"):
                     log_info(f"Upload thành công qua {service['name']}: {result_text}")
@@ -216,19 +216,13 @@ def upload_temp_file_robust(uploaded_file):
     log_error("Tất cả các dịch vụ upload trung gian đều thất bại.")
     return None
 
-def start_mineru_task_by_url(api_token, file_url, lang="ch", is_ocr=True, enable_formula=True, enable_table=True):
+def start_mineru_task_by_url(api_token, file_url):
     url = f"{MINERU_BASE_URL}/api/v4/extract/task"
-    headers = {"Authorization": f"Bearer {api_token.strip()}", "Content-Type": "application/json"}
-    payload = {
-        "url": file_url,
-        "lang": lang,
-        "is_ocr": is_ocr,
-        "enable_formula": enable_formula,
-        "enable_table": enable_table
-    }
+    headers = {"Authorization": f"Bearer {api_token}", "Content-Type": "application/json"}
+    payload = {"url": file_url, "model_version": "vlm", "is_ocr": True}
     
     try:
-        log_info(f"Đang gửi request tạo task MinerU cho URL: {file_url} (Lang: {lang})")
+        log_info(f"Đang gửi request tạo task MinerU cho URL: {file_url}")
         response = requests.post(url, json=payload, headers=headers, timeout=30)
         if response.status_code == 200:
             res_json = response.json()
@@ -246,7 +240,7 @@ def start_mineru_task_by_url(api_token, file_url, lang="ch", is_ocr=True, enable
 
 def check_task_status_v4(api_token, task_id):
     url = f"{MINERU_BASE_URL}/api/v4/extract/task/{task_id}"
-    headers = {"Authorization": f"Bearer {api_token.strip()}"}
+    headers = {"Authorization": f"Bearer {api_token}"}
     try:
         response = requests.get(url, headers=headers, timeout=30)
         if response.status_code == 200:
@@ -467,22 +461,6 @@ with tab1:
             log_info("Đã cập nhật Gemini API Key mới.")
             st.rerun()
 
-    # --- TÙY CHỌN NÂNG CAO CHO MINERU ---
-    col_opt1, col_opt2, col_opt3, col_opt4 = st.columns(4)
-    with col_opt1:
-        lang_choice = st.selectbox(
-            "Ngôn ngữ MinerU:",
-            options=["ch", "en"],
-            format_func=lambda x: "Tiếng Việt / Đa ngôn ngữ (ch)" if x == "ch" else "Tiếng Anh (en)",
-            index=0
-        )
-    with col_opt2:
-        opt_ocr = st.checkbox("Bật OCR", value=True)
-    with col_opt3:
-        opt_formula = st.checkbox("Công thức Toán", value=True)
-    with col_opt4:
-        opt_table = st.checkbox("Bóc tách bảng", value=True)
-
     selected_gemini_model = st.selectbox("Chọn Model Gemini dự phòng:", ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash", "gemini-1.5-pro"], index=0)
     api_file = st.file_uploader("Chọn file PDF hoặc ảnh cần phân tích qua MinerU", type=["pdf", "png", "jpg", "jpeg"], key="tab1_upload")
     
@@ -492,28 +470,21 @@ with tab1:
         else:
             success_processed = False
             task_id = None
-            log_info(f"Bắt đầu xử lý file qua Tab 1: {api_file.name} (Lang: {lang_choice})")
+            log_info(f"Bắt đầu xử lý file qua Tab 1: {api_file.name}")
             
             with st.spinner("Đang tải file lên máy chủ trung gian..."):
                 file_url = upload_temp_file_robust(api_file)
                 
             if file_url:
                 with st.spinner("Đang khởi tạo tác vụ xử lý trên MinerU..."):
-                    task_id = start_mineru_task_by_url(
-                        st.session_state.saved_mineru_key, 
-                        file_url,
-                        lang=lang_choice,
-                        is_ocr=opt_ocr,
-                        enable_formula=opt_formula,
-                        enable_table=opt_table
-                    )
+                    task_id = start_mineru_task_by_url(st.session_state.saved_mineru_key, file_url)
                 
                 if task_id:
                     st.success(f"Khởi tạo thành công! Task ID: `{task_id}`. Đang chờ MinerU xử lý...")
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    for i in range(80):
+                    for i in range(60):
                         time.sleep(5)
                         task_data = check_task_status_v4(st.session_state.saved_mineru_key, task_id)
                         state = task_data.get("state")
@@ -536,12 +507,11 @@ with tab1:
                                         st.rerun()
                             break
                         elif state == "failed":
-                            err_msg = task_data.get("err_msg", "Không rõ nguyên nhân")
-                            log_error(f"MinerU báo lỗi xử lý thất bại đối với task {task_id}: {err_msg}")
-                            st.warning(f"MinerU báo lỗi xử lý thất bại: {err_msg}")
+                            log_error(f"MinerU báo lỗi xử lý thất bại (failed) đối với task {task_id}.")
+                            st.warning("MinerU báo lỗi xử lý thất bại đối với file này.")
                             break
                         
-                        progress_bar.progress(min(int((i + 1) * 1.3), 100))
+                        progress_bar.progress(min((i + 1) * 1.5, 100))
                 else:
                     log_warning_msg = "Không thể khởi tạo Task ID trên MinerU."
                     log_error(log_warning_msg)
@@ -637,7 +607,7 @@ with tab2:
                                             img_data_decoded = base64.b64decode(img_b64)
                                             img_filename = img_id if img_id.lower().endswith((".jpeg", ".jpg", ".png")) else f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_data_decoded
-                                        except Exception: 
+                                        except: 
                                             pass
 
                     zip_buffer = io.BytesIO()
@@ -699,7 +669,7 @@ with tab2:
             [
                 "🙏 Niệm Phật / Bồ Tát (Nam Mô A Di Đà Phật, Quan Thế Âm...)",
                 "✝️ Cầu nguyện theo Đức Chúa Trời / Thiên Chúa",
-                "📿 Lời khấn nguyện / Niệm thần thánh theo tôn宗教 của tôi",
+                "📿 Lời khấn nguyện / Niệm thần thánh theo tôn giáo của tôi",
                 "🌿 Cam kết làm một việc tốt / Giúp ích cho đời trong hôm nay"
             ]
         )
