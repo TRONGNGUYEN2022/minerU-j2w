@@ -38,14 +38,16 @@ try:
     from google import genai
     from google.genai import types
     GEMINI_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    log_error(f"google-genai not available: {e}")
     GEMINI_AVAILABLE = False
 
 # Import thư viện mistralai SDK 2.0
 try:
     from mistralai.client import Mistral
     MISTRAL_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    log_error(f"mistralai not available: {e}")
     MISTRAL_AVAILABLE = False
 
 # --- CẤU HÌNH LƯU KEY RA FILE TRÊN SERVER ---
@@ -56,8 +58,8 @@ def load_saved_config():
         try:
             with open(CONFIG_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
-            pass
+        except Exception as e:
+            log_error(f"Failed to load config file: {e}")
     return {}
 
 def save_config(gemini_key, mistral_key, mineru_key):
@@ -69,15 +71,17 @@ def save_config(gemini_key, mistral_key, mineru_key):
     try:
         with open(CONFIG_FILE, "w", encoding="utf-8") as f:
             json.dump(config_data, f, ensure_ascii=False, indent=4)
-    except:
-        pass
+    except Exception as e:
+        log_error(f"Failed to save config file: {e}")
 
 # Đọc cấu hình đã lưu trên server (nếu có)
 saved_config = load_saved_config()
 
-DEFAULT_MINERU_KEY = saved_config.get("mineru_key", "sk-IDb81Oj2W6pHrODooHN0xtKTxEXNzipsnZP6OxAqAl65Kz9O")
-DEFAULT_GEMINI_KEY = saved_config.get("gemini_key", "AQ.Ab8RN6IiVh_ufztKik5rSMrl39c-U6_L6v5oy_Qru1-YNUBdRg")
-DEFAULT_MISTRAL_KEY = saved_config.get("mistral_key", "Asht2uDLjH8WTWnU06dBWdPbpcVQrbt5")
+# Get API keys from environment variables first, then fallback to config file
+# This is the secure way - never hardcode keys in source code
+DEFAULT_MINERU_KEY = os.environ.get("MINERU_API_KEY") or saved_config.get("mineru_key") or ""
+DEFAULT_GEMINI_KEY = os.environ.get("GEMINI_API_KEY") or saved_config.get("gemini_key") or ""
+DEFAULT_MISTRAL_KEY = os.environ.get("MISTRAL_API_KEY") or saved_config.get("mistral_key") or ""
 
 # --- CẤU HÌNH GIAO DIỆN ---
 st.set_page_config(page_title="Convert PDF/Image to word (MinerU - Mistral - Gemini)", page_icon="📐", layout="wide")
@@ -127,8 +131,8 @@ def cleanup_old_temp_files():
         if f_name.lower().endswith((".jpeg", ".jpg", ".png", ".docx", ".zip")) or f_name == "temp_input.md":
             try:
                 os.remove(os.path.join(root_dir, f_name))
-            except:
-                pass
+            except Exception as e:
+                log_error(f"Failed to remove temp file {f_name}: {e}")
 
 def clean_and_wrap_latex(latex_str):
     if not latex_str: return ""
@@ -148,7 +152,7 @@ def extract_zip_and_get_data(zip_bytes):
             elif filename.endswith("layout.json") and not filename.startswith("__MACOSX"):
                 try:
                     json_data = json.loads(z.read(filename).decode("utf-8"))
-                except Exception as e:
+                except (json.JSONDecodeError, UnicodeDecodeError) as e:
                     log_error(f"Lỗi đọc layout.json từ ZIP: {e}")
     return json_data, images_dict
 
@@ -205,8 +209,8 @@ def upload_temp_file_robust(uploaded_file):
                                 raw_url = raw_url.replace("tmpfiles.org/", "tmpfiles.org/dl/")
                             log_info(f"Upload thành công qua TmpFiles: {raw_url}")
                             return raw_url
-                    except:
-                        pass
+                    except (json.JSONDecodeError, KeyError) as e:
+                        log_error(f"Failed to parse TmpFiles response: {e}")
                 elif result_text.startswith("http"):
                     log_info(f"Upload thành công qua {service['name']}: {result_text}")
                     return result_text
@@ -607,9 +611,8 @@ with tab2:
                                             img_data_decoded = base64.b64decode(img_b64)
                                             img_filename = img_id if img_id.lower().endswith((".jpeg", ".jpg", ".png")) else f"{img_id}.jpeg"
                                             images_dict[img_filename] = img_data_decoded
-                                        except: 
-                                            pass
-
+                                        except Exception as e:
+                                            log_error(f"Failed to decode image base64: {e}")
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                         zip_file.writestr("output.md", full_markdown)
